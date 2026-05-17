@@ -1,0 +1,31 @@
+# Flutter/Dart
+arbpay_apk/build/
+arbpay_apk/.dart_tool/
+arbpay_apk/.flutter-plugins
+arbpay_apk/.flutter-plugins-dependencies
+arbpay_apk/.packages
+arbpay_apk/pubspec.lock
+
+# Android
+arbpay_apk/android/.gradle/
+arbpay_apk/android/local.properties
+arbpay_apk/android/key.properties
+*.jks
+*.keystore
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+
+# Local assets (not for repo)
+github-profile-photo.jpg

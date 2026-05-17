@@ -1,0 +1,27 @@
+---
+description: Always bump the APK version before building
+alwaysApply: true
+---
+
+# APK Version Bump Rule
+
+**Before every `flutter build apk` command**, you MUST increment the version in two places:
+
+## 1. `arbpay_apk/pubspec.yaml`
+Increment the patch version:
+```
+# e.g. 1.0.2 → 1.0.3
+version: X.Y.Z
+```
+
+## 2. `arbpay_apk/lib/screens/home_screen.dart`
+Keep `kBuildVersion` in sync with `pubspec.yaml`:
+```dart
+const kBuildVersion = 'vX.Y.Z';
+```
+
+## Rules
+- Never reuse a version number across different builds.
+- Increment the patch version (Z) by 1 each build.
+- Do this BEFORE running `flutter build apk`, never after.
+- After installing the new APK on the emulator the user can verify the badge in the top bar matches the expected version.

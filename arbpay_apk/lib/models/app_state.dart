@@ -1,0 +1,81 @@
+import 'package:flutter/foundation.dart';
+
+enum BotStatus { idle, connecting, cloudflare, loggingIn, capturing, running, qrReady, success, error }
+
+class LogEntry {
+  final String time;
+  final String message;
+  final LogLevel level;
+
+  LogEntry({required this.time, required this.message, required this.level});
+}
+
+enum LogLevel { info, success, warning, error }
+
+class AppState extends ChangeNotifier {
+  BotStatus _status = BotStatus.idle;
+  final List<LogEntry> _logs = [];
+  int _rounds = 0;
+  int _attempts = 0;
+  int _successCount = 0;
+  String _currentOrder = '';
+
+  // Settings
+  String phone = '';
+  String password = '';
+  int amountMin = 1700;
+  int amountMax = 2000;
+
+  BotStatus get status => _status;
+  List<LogEntry> get logs => List.unmodifiable(_logs);
+  int get rounds => _rounds;
+  int get attempts => _attempts;
+  int get successCount => _successCount;
+  String get currentOrder => _currentOrder;
+
+  void setStatus(BotStatus s) {
+    _status = s;
+    notifyListeners();
+  }
+
+  void addLog(String message, {LogLevel level = LogLevel.info}) {
+    final now = DateTime.now();
+    final time =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    _logs.insert(0, LogEntry(time: time, message: message, level: level));
+    if (_logs.length > 200) _logs.removeLast();
+    notifyListeners();
+  }
+
+  void incrementAttempts() {
+    _attempts++;
+    notifyListeners();
+  }
+
+  void incrementRounds() {
+    _rounds++;
+    notifyListeners();
+  }
+
+  void incrementSuccess() {
+    _successCount++;
+    notifyListeners();
+  }
+
+  void setCurrentOrder(String order) {
+    _currentOrder = order;
+    notifyListeners();
+  }
+
+  void reset() {
+    _status = BotStatus.idle;
+    _attempts = 0;
+    _currentOrder = '';
+    notifyListeners();
+  }
+
+  void clearLogs() {
+    _logs.clear();
+    notifyListeners();
+  }
+}
