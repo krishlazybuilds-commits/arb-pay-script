@@ -17,6 +17,7 @@ arbpay_apk/android/key.properties
 .idea/
 *.iml
 .vscode/
+.kiro/
 *.suo
 *.user
 
