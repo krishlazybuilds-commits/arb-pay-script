@@ -6,6 +6,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../models/app_state.dart';
 import '../services/arbpay_service.dart';
 import '../widgets/log_panel.dart';
+import '../theme/app_theme.dart';
 import 'settings_screen.dart';
 
 Future<void> _clearWebViewSession() async {
@@ -14,19 +15,6 @@ Future<void> _clearWebViewSession() async {
 }
 
 const kBuildVersion = 'v1.0.7';
-
-// ── Design tokens ──────────────────────────────────────────────────────────────
-const _bg       = Color(0xFF0A0A0F);
-const _surface  = Color(0xFF13131A);
-const _card     = Color(0xFF1C1C26);
-const _border   = Color(0xFF2A2A38);
-const _yellow   = Color(0xFFFFCC00);
-const _yellowDim= Color(0x33FFCC00);
-const _white    = Color(0xFFFFFFFF);
-const _grey     = Color(0xFF8888A0);
-const _greyDim  = Color(0xFF3A3A50);
-const _red      = Color(0xFFFF4444);
-const _green    = Color(0xFF00E676);
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -56,7 +44,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final state = context.read<AppState>();
     _phoneCtrl.text = state.phone;
     _passCtrl.text  = state.password;
-
     _pulseCtrl = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
@@ -79,12 +66,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     state.phone    = _phoneCtrl.text.trim();
     state.password = _passCtrl.text;
     await _clearWebViewSession();
-    setState(() {
-      _webViewKey++;
-      _webController = null;
-      _showWebView   = true;
-      _loginReady    = false;
-    });
+    setState(() { _webViewKey++; _webController = null; _showWebView = true; _loginReady = false; });
   }
 
   Future<void> _completeCaptureAndRun() async {
@@ -93,9 +75,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     state.setStatus(BotStatus.capturing);
     state.addLog('Capturing token from session...', level: LogLevel.info);
     if (_webController != null) _service.init(_webController!, state);
-    await _service.captureTokenAndRun(
-      state.phone, state.password, state.amountMin, state.amountMax,
-    );
+    await _service.captureTokenAndRun(state.phone, state.password, state.amountMin, state.amountMax);
     setState(() { _isRunning = false; _showWebView = false; _loginReady = false; });
   }
 
@@ -109,37 +89,32 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     state.reset();
     state.clearLogs();
     _service.stop();
-    setState(() {
-      _isRunning   = false;
-      _showWebView = false;
-      _loginReady  = false;
-      _webViewKey++;
-      _webController = null;
-    });
+    setState(() { _isRunning = false; _showWebView = false; _loginReady = false; _webViewKey++; _webController = null; });
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
-      child: Scaffold(
-        backgroundColor: _bg,
-        body: SafeArea(
-          child: Consumer<AppState>(
-            builder: (context, state, _) => _showWebView
-                ? _buildWebViewStep(state)
-                : _buildMainStep(state),
+    return Consumer<AppState>(
+      builder: (context, state, _) {
+        final t = AppTheme(state.isDark);
+        return AnnotatedRegion<SystemUiOverlayStyle>(
+          value: t.isDark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+          child: Scaffold(
+            backgroundColor: t.bg,
+            body: SafeArea(
+              child: _showWebView ? _buildWebView(state, t) : _buildMain(state, t),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
-  // ── Main screen ────────────────────────────────────────────────────────────
-  Widget _buildMainStep(AppState state) {
+  // ── Main ───────────────────────────────────────────────────────────────────
+  Widget _buildMain(AppState state, AppTheme t) {
     return Column(
       children: [
-        _buildHeader(state),
+        _buildHeader(state, t),
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
@@ -147,39 +122,31 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 16),
-                _buildStatusBanner(state),
+                _buildStatusBanner(state, t),
                 const SizedBox(height: 16),
-                _buildStatsRow(state),
+                _buildStatsRow(state, t),
                 const SizedBox(height: 20),
-                _buildSectionLabel('CREDENTIALS'),
+                _sectionLabel('CREDENTIALS', t),
                 const SizedBox(height: 10),
-                _buildInputField(
-                  controller: _phoneCtrl,
-                  label: 'Phone / Username',
-                  icon: Icons.phone_android_rounded,
-                  keyboardType: TextInputType.phone,
-                  enabled: !_isRunning,
-                ),
+                _inputField(controller: _phoneCtrl, label: 'Phone / Username',
+                  icon: Icons.phone_android_rounded, t: t, enabled: !_isRunning),
                 const SizedBox(height: 10),
-                _buildInputField(
-                  controller: _passCtrl,
-                  label: 'Password',
-                  icon: Icons.lock_outline_rounded,
-                  obscure: _obscurePass,
-                  enabled: !_isRunning,
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                      color: _greyDim, size: 18),
+                _inputField(
+                  controller: _passCtrl, label: 'Password',
+                  icon: Icons.lock_outline_rounded, t: t,
+                  obscure: _obscurePass, enabled: !_isRunning,
+                  suffix: IconButton(
+                    icon: Icon(_obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                      color: t.textDim, size: 18),
                     onPressed: () => setState(() => _obscurePass = !_obscurePass),
                   ),
                 ),
                 const SizedBox(height: 20),
-                _buildActionButtons(state),
+                _buildActions(state, t),
                 const SizedBox(height: 20),
-                _buildSectionLabel('LIVE LOG'),
+                _sectionLabel('LIVE LOG', t),
                 const SizedBox(height: 10),
-                SizedBox(height: 280, child: const LogPanel()),
+                SizedBox(height: 280, child: LogPanel(t: t)),
               ],
             ),
           ),
@@ -189,109 +156,62 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   // ── Header ─────────────────────────────────────────────────────────────────
-  Widget _buildHeader(AppState state) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      decoration: const BoxDecoration(
-        color: _bg,
-        border: Border(bottom: BorderSide(color: _border, width: 0.5)),
+  Widget _buildHeader(AppState state, AppTheme t) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        color: t.bg,
+        border: Border(bottom: BorderSide(color: t.border, width: 0.5)),
       ),
       child: Row(
         children: [
-          // Logo mark
-          Container(
-            width: 38, height: 38,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.asset(
-                state.isDark
-                    ? 'assets/images/app_icon_dark.png'
-                    : 'assets/images/app_icon_light.png',
-                width: 38, height: 38, fit: BoxFit.cover),
-            ),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.asset(
+              state.isDark ? 'assets/images/app_icon_dark.png' : 'assets/images/app_icon_light.png',
+              width: 38, height: 38, fit: BoxFit.cover),
           ),
           const SizedBox(width: 12),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('ARBPay Bot',
-                style: TextStyle(color: _white, fontWeight: FontWeight.bold, fontSize: 16)),
-              Row(
-                children: [
-                  Text('Auto Buy Engine',
-                    style: TextStyle(color: _grey, fontSize: 10, letterSpacing: 0.5)),
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: _yellowDim,
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: _yellow.withValues(alpha: 0.4)),
-                    ),
-                    child: Text(kBuildVersion,
-                      style: const TextStyle(
-                        color: _yellow, fontSize: 9,
-                        fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+              Text('ARBPay Bot', style: TextStyle(
+                color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
+              Row(children: [
+                Text('Auto Buy Engine', style: TextStyle(color: t.textSub, fontSize: 10, letterSpacing: 0.5)),
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: t.isDark ? const Color(0x33FFCC00) : const Color(0xFF1A1A1A),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.transparent),
                   ),
-                ],
-              ),
+                  child: Text(kBuildVersion, style: TextStyle(
+                    color: t.isDark ? t.yellow : const Color(0xFFFFCC00),
+                    fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                ),
+              ]),
             ],
           ),
           const Spacer(),
           // Theme toggle
-          GestureDetector(
+          _headerBtn(
+            icon: state.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+            color: t.yellow, t: t,
             onTap: () async {
               state.toggleTheme();
               final prefs = await SharedPreferences.getInstance();
               await prefs.setBool('isDark', state.isDark);
             },
-            child: Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                color: _card,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _border),
-              ),
-              child: Icon(
-                state.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                color: _yellow, size: 18),
-            ),
           ),
           const SizedBox(width: 8),
           // Mode badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: _card,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _border),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  state.paymentMode == PaymentMode.bank
-                      ? Icons.account_balance : Icons.currency_rupee,
-                  color: _yellow, size: 12),
-                const SizedBox(width: 5),
-                Text(
-                  state.paymentMode == PaymentMode.bank ? 'BANK' : 'UPI',
-                  style: const TextStyle(
-                    color: _yellow, fontSize: 10,
-                    fontWeight: FontWeight.bold, letterSpacing: 0.8)),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
           GestureDetector(
-            onTap: _isRunning ? null : () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ChangeNotifierProvider.value(
-                  value: state, child: const SettingsScreen()),
-              ),
+            onTap: _isRunning ? null : () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => ChangeNotifierProvider.value(
+                value: state, child: const SettingsScreen())),
             ).then((_) {
               if (mounted) {
                 final s = context.read<AppState>();
@@ -299,192 +219,179 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 _passCtrl.text  = s.password;
               }
             }),
-            child: Container(
-              width: 36, height: 36,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: _card,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _border),
+                color: t.card,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: t.border),
               ),
-              child: Icon(Icons.tune_rounded,
-                color: _isRunning ? _greyDim : _grey, size: 18),
+              child: Row(children: [
+                Icon(state.paymentMode == PaymentMode.bank
+                  ? Icons.account_balance : Icons.currency_rupee,
+                  color: t.yellow, size: 12),
+                const SizedBox(width: 5),
+                Text(state.paymentMode == PaymentMode.bank ? 'BANK' : 'UPI',
+                  style: TextStyle(color: t.yellow, fontSize: 10,
+                    fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+              ]),
             ),
           ),
+          const SizedBox(width: 8),
+          _headerBtn(icon: Icons.tune_rounded, color: t.textSub, t: t,
+            onTap: _isRunning ? null : () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => ChangeNotifierProvider.value(
+                value: state, child: const SettingsScreen())),
+            ).then((_) {
+              if (mounted) {
+                final s = context.read<AppState>();
+                _phoneCtrl.text = s.phone;
+                _passCtrl.text  = s.password;
+              }
+            }),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _headerBtn({required IconData icon, required Color color,
+      required AppTheme t, VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        width: 36, height: 36,
+        decoration: BoxDecoration(
+          color: t.card,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: t.border),
+        ),
+        child: Icon(icon, color: onTap == null ? t.textDim : color, size: 18),
       ),
     );
   }
 
   // ── Status banner ──────────────────────────────────────────────────────────
-  Widget _buildStatusBanner(AppState state) {
-    final info = _statusInfo(state.status);
-    final isActive = [
-      BotStatus.running, BotStatus.capturing,
-      BotStatus.connecting, BotStatus.loggingIn,
-    ].contains(state.status);
+  Widget _buildStatusBanner(AppState state, AppTheme t) {
+    final info = _statusInfo(state.status, t);
+    final isActive = [BotStatus.running, BotStatus.capturing,
+      BotStatus.connecting, BotStatus.loggingIn].contains(state.status);
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _card,
+        color: t.card,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: info.color.withValues(alpha: 0.25)),
-        boxShadow: [
-          BoxShadow(
-            color: info.color.withValues(alpha: 0.06),
-            blurRadius: 20, spreadRadius: 0,
-          ),
-        ],
+        boxShadow: [BoxShadow(color: info.color.withValues(alpha: 0.06), blurRadius: 20)],
       ),
-      child: Row(
-        children: [
-          // Pulse dot
-          AnimatedBuilder(
-            animation: _pulseAnim,
-            builder: (_, __) => Container(
-              width: 10, height: 10,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: info.color.withValues(alpha: isActive ? _pulseAnim.value : 0.8),
-                boxShadow: isActive ? [
-                  BoxShadow(
-                    color: info.color.withValues(alpha: 0.4 * _pulseAnim.value),
-                    blurRadius: 10, spreadRadius: 2,
-                  ),
-                ] : null,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(info.label,
-                  style: TextStyle(
-                    color: info.color,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14, letterSpacing: 0.8)),
-                if (state.currentOrder.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text('Order: ${state.currentOrder}',
-                    style: TextStyle(color: _grey, fontSize: 11,
-                      fontFamily: 'monospace')),
-                ],
-              ],
-            ),
-          ),
-          // Range chip
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child: Row(children: [
+        AnimatedBuilder(
+          animation: _pulseAnim,
+          builder: (_, __) => Container(
+            width: 10, height: 10,
             decoration: BoxDecoration(
-              color: _bg,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _border),
-            ),
-            child: Column(
-              children: [
-                Text('₹${state.amountMin}–₹${state.amountMax}',
-                  style: const TextStyle(
-                    color: _white, fontSize: 11, fontWeight: FontWeight.w600)),
-                Text('RANGE', style: TextStyle(color: _grey, fontSize: 8,
-                  letterSpacing: 0.8)),
-              ],
+              shape: BoxShape.circle,
+              color: info.color.withValues(alpha: isActive ? _pulseAnim.value : 0.8),
+              boxShadow: isActive ? [BoxShadow(
+                color: info.color.withValues(alpha: 0.4 * _pulseAnim.value),
+                blurRadius: 10, spreadRadius: 2)] : null,
             ),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(info.label, style: TextStyle(
+              color: info.color, fontWeight: FontWeight.bold,
+              fontSize: 14, letterSpacing: 0.8)),
+            if (state.currentOrder.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text('Order: ${state.currentOrder}',
+                style: TextStyle(color: t.textSub, fontSize: 11, fontFamily: 'monospace')),
+            ],
+          ],
+        )),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: t.bg,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: t.border),
+          ),
+          child: Column(children: [
+            Text('₹${state.amountMin}–₹${state.amountMax}',
+              style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.w600)),
+            Text('RANGE', style: TextStyle(color: t.textSub, fontSize: 8, letterSpacing: 0.8)),
+          ]),
+        ),
+      ]),
     );
   }
 
   // ── Stats row ──────────────────────────────────────────────────────────────
-  Widget _buildStatsRow(AppState state) {
-    return Row(
-      children: [
-        _StatCard(label: 'ATTEMPTS', value: '${state.attempts}',
-          icon: Icons.refresh_rounded, color: _grey),
-        const SizedBox(width: 10),
-        _StatCard(label: 'ROUNDS', value: '${state.rounds}',
-          icon: Icons.loop_rounded, color: _yellow),
-        const SizedBox(width: 10),
-        _StatCard(label: 'WINS', value: '${state.successCount}',
-          icon: Icons.emoji_events_rounded, color: _green),
+  Widget _buildStatsRow(AppState state, AppTheme t) {
+    return Row(children: [
+      _StatCard(label: 'ATTEMPTS', value: '${state.attempts}',
+        icon: Icons.refresh_rounded, color: t.textSub, t: t),
+      const SizedBox(width: 10),
+      _StatCard(label: 'ROUNDS', value: '${state.rounds}',
+        icon: Icons.loop_rounded, color: t.yellow, t: t),
+      const SizedBox(width: 10),
+      _StatCard(label: 'WINS', value: '${state.successCount}',
+        icon: Icons.emoji_events_rounded, color: t.green, t: t),
+    ]);
+  }
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+  Widget _buildActions(AppState state, AppTheme t) {
+    return Column(children: [
+      if (!_isRunning && state.status != BotStatus.qrReady)
+        _PrimaryBtn(label: 'CAPTURE TOKEN', icon: Icons.fingerprint_rounded,
+          t: t, onTap: _captureToken),
+      if (_isRunning)
+        _OutlineBtn(label: 'STOP BOT', icon: Icons.stop_circle_outlined,
+          color: t.red, t: t, onTap: _stopBot),
+      if (!_isRunning && state.status == BotStatus.qrReady) ...[
+        _PrimaryBtn(label: 'CAPTURE TOKEN', icon: Icons.fingerprint_rounded,
+          t: t, onTap: _captureToken),
+        const SizedBox(height: 10),
+        _OutlineBtn(label: 'RESTART FLOW', icon: Icons.replay_rounded,
+          color: t.yellow, t: t, onTap: _restartFlow),
       ],
-    );
+    ]);
   }
 
-  // ── Action buttons ─────────────────────────────────────────────────────────
-  Widget _buildActionButtons(AppState state) {
-    return Column(
-      children: [
-        if (!_isRunning && state.status != BotStatus.qrReady)
-          _PrimaryButton(
-            label: 'CAPTURE TOKEN',
-            icon: Icons.fingerprint_rounded,
-            onTap: _captureToken,
-          ),
-
-        if (_isRunning)
-          _OutlineButton(
-            label: 'STOP BOT',
-            icon: Icons.stop_circle_outlined,
-            color: _red,
-            onTap: _stopBot,
-          ),
-
-        if (!_isRunning && state.status == BotStatus.qrReady) ...[
-          _PrimaryButton(
-            label: 'CAPTURE TOKEN',
-            icon: Icons.fingerprint_rounded,
-            onTap: _captureToken,
-          ),
-          const SizedBox(height: 10),
-          _OutlineButton(
-            label: 'RESTART FLOW',
-            icon: Icons.replay_rounded,
-            color: _yellow,
-            onTap: _restartFlow,
-          ),
-        ],
-      ],
-    );
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  Widget _sectionLabel(String label, AppTheme t) {
+    return Text(label, style: TextStyle(
+      color: t.textSub, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.5));
   }
 
-  // ── Section label ──────────────────────────────────────────────────────────
-  Widget _buildSectionLabel(String label) {
-    return Text(label,
-      style: TextStyle(
-        color: _grey, fontSize: 10,
-        fontWeight: FontWeight.bold, letterSpacing: 1.5));
-  }
-
-  // ── Input field ────────────────────────────────────────────────────────────
-  Widget _buildInputField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    TextInputType keyboardType = TextInputType.text,
-    bool obscure = false,
-    bool enabled = true,
-    Widget? suffixIcon,
+  Widget _inputField({
+    required TextEditingController controller, required String label,
+    required IconData icon, required AppTheme t,
+    bool obscure = false, bool enabled = true, Widget? suffix,
   }) {
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
       decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _border),
+        color: t.card, borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: t.border),
       ),
       child: TextField(
-        controller: controller,
-        obscureText: obscure,
-        keyboardType: keyboardType,
-        enabled: enabled,
-        style: const TextStyle(color: _white, fontSize: 15),
+        controller: controller, obscureText: obscure, enabled: enabled,
+        style: TextStyle(color: t.textPrimary, fontSize: 15),
         decoration: InputDecoration(
-          prefixIcon: Icon(icon, color: _greyDim, size: 20),
-          suffixIcon: suffixIcon,
+          prefixIcon: Icon(icon, color: t.textDim, size: 20),
+          suffixIcon: suffix,
           labelText: label,
-          labelStyle: TextStyle(color: _grey, fontSize: 13),
+          labelStyle: TextStyle(color: t.textSub, fontSize: 13),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
         ),
@@ -492,455 +399,334 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── WebView step ───────────────────────────────────────────────────────────
-  Widget _buildWebViewStep(AppState state) {
-    return Column(
-      children: [
-        // WebView header
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          color: _bg,
-          child: Row(
-            children: [
-              GestureDetector(
-                onTap: () => setState(() { _showWebView = false; _loginReady = false; }),
-                child: Container(
-                  width: 36, height: 36,
-                  decoration: BoxDecoration(
-                    color: _card, borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: _border),
-                  ),
-                  child: const Icon(Icons.arrow_back_ios_new_rounded,
-                    color: _grey, size: 16),
-                ),
+  // ── WebView ────────────────────────────────────────────────────────────────
+  Widget _buildWebView(AppState state, AppTheme t) {
+    return Column(children: [
+      AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        color: t.bg,
+        child: Row(children: [
+          _headerBtn(icon: Icons.arrow_back_ios_new_rounded, color: t.textSub, t: t,
+            onTap: () => setState(() { _showWebView = false; _loginReady = false; })),
+          const SizedBox(width: 12),
+          Expanded(child: Text('Login to ARBPay',
+            style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 16))),
+          GestureDetector(
+            onTap: () => _showLogsSheet(state, t),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: t.yellowDim, borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: t.yellow.withValues(alpha: 0.3)),
               ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text('Login to ARBPay',
-                  style: TextStyle(color: _white, fontWeight: FontWeight.bold,
-                    fontSize: 16)),
-              ),
-              GestureDetector(
-                onTap: () => _showLogsSheet(state),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: _yellowDim,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _yellow.withValues(alpha: 0.3)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.terminal, color: _yellow, size: 13),
-                      SizedBox(width: 5),
-                      Text('LOGS', style: TextStyle(
-                        color: _yellow, fontSize: 11,
-                        fontWeight: FontWeight.bold, letterSpacing: 0.8)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Container(height: 0.5, color: _border),
-        // Hint bar
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          color: _surface,
-          child: Row(
-            children: [
-              const Icon(Icons.info_outline_rounded, color: _yellow, size: 15),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Log in below, then tap "Run Bot" once you reach the home page.',
-                  style: TextStyle(color: _grey, fontSize: 12)),
-              ),
-            ],
-          ),
-        ),
-        // WebView
-        Expanded(
-          child: ClipRRect(
-            child: InAppWebView(
-              key: ValueKey(_webViewKey),
-              initialUrlRequest: URLRequest(url: WebUri('https://arbpay.me')),
-              initialSettings: InAppWebViewSettings(
-                javaScriptEnabled: true,
-                domStorageEnabled: true,
-                databaseEnabled: true,
-                userAgent: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) '
-                    'AppleWebKit/537.36 (KHTML, like Gecko) '
-                    'Chrome/120.0.0.0 Mobile Safari/537.36',
-              ),
-              onWebViewCreated: (c) { _webController = c; _service.init(c, state); },
-              onLoadStop: (c, url) async {
-                _webController = c;
-                await _handleUrlChange(c, url?.toString() ?? '');
-              },
-              onUpdateVisitedHistory: (c, url, _) async {
-                await _handleUrlChange(c, url?.toString() ?? '');
-              },
+              child: Row(children: [
+                Icon(Icons.terminal, color: t.yellow, size: 13),
+                const SizedBox(width: 5),
+                Text('LOGS', style: TextStyle(color: t.yellow, fontSize: 11,
+                  fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+              ]),
             ),
           ),
-        ),
-        // Bottom action bar
-        Container(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-          decoration: BoxDecoration(
-            color: _bg,
-            border: const Border(top: BorderSide(color: _border, width: 0.5)),
-          ),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
-            child: _loginReady && !_isRunning
-                ? _PrimaryButton(
-                    key: const ValueKey('run'),
-                    label: 'RUN BOT',
-                    icon: Icons.bolt_rounded,
-                    onTap: _completeCaptureAndRun,
-                  )
-                : Container(
-                    key: const ValueKey('wait'),
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: _card,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: _border),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        SizedBox(
-                          width: 14, height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: _grey,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(_isRunning ? 'Running...' : 'Waiting for login...',
-                          style: TextStyle(color: _grey, fontSize: 14)),
-                      ],
-                    ),
-                  ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _showLogsSheet(AppState state) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => ChangeNotifierProvider.value(
-        value: state,
-        child: _LogsSheet(),
+        ]),
       ),
+      Container(height: 0.5, color: t.border),
+      AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        color: t.surface,
+        child: Row(children: [
+          Icon(Icons.info_outline_rounded, color: t.yellow, size: 15),
+          const SizedBox(width: 8),
+          Expanded(child: Text('Log in below, then tap "Run Bot" once on the home page.',
+            style: TextStyle(color: t.textSub, fontSize: 12))),
+        ]),
+      ),
+      Expanded(child: InAppWebView(
+        key: ValueKey(_webViewKey),
+        initialUrlRequest: URLRequest(url: WebUri('https://arbpay.me')),
+        initialSettings: InAppWebViewSettings(
+          javaScriptEnabled: true, domStorageEnabled: true, databaseEnabled: true,
+          userAgent: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+        ),
+        onWebViewCreated: (c) { _webController = c; _service.init(c, state); },
+        onLoadStop: (c, url) async { _webController = c; await _handleUrlChange(c, url?.toString() ?? ''); },
+        onUpdateVisitedHistory: (c, url, _) async { await _handleUrlChange(c, url?.toString() ?? ''); },
+      )),
+      AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+        decoration: BoxDecoration(
+          color: t.bg,
+          border: Border(top: BorderSide(color: t.border, width: 0.5)),
+        ),
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: _loginReady && !_isRunning
+              ? _PrimaryBtn(key: const ValueKey('run'), label: 'RUN BOT',
+                  icon: Icons.bolt_rounded, t: t, onTap: _completeCaptureAndRun)
+              : AnimatedContainer(
+                  key: const ValueKey('wait'),
+                  duration: const Duration(milliseconds: 300),
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: t.card, borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: t.border),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    SizedBox(width: 14, height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: t.textSub)),
+                    const SizedBox(width: 10),
+                    Text(_isRunning ? 'Running...' : 'Waiting for login...',
+                      style: TextStyle(color: t.textSub, fontSize: 14)),
+                  ]),
+                ),
+        ),
+      ),
+    ]);
+  }
+
+  void _showLogsSheet(AppState state, AppTheme t) {
+    showModalBottomSheet(
+      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
+      builder: (_) => ChangeNotifierProvider.value(value: state, child: _LogsSheet(t: t)),
     );
   }
 
-  Future<void> _handleUrlChange(InAppWebViewController controller, String urlStr) async {
-    _webController = controller;
-    final isLoginPage = urlStr.contains('login') ||
-        urlStr == 'https://arbpay.me/' ||
-        urlStr == 'https://arbpay.me/#/' ||
-        urlStr.endsWith('arbpay.me');
-    if (isLoginPage) {
-      await _autoFillLogin(controller);
-      if (mounted) setState(() => _loginReady = false);
-    } else if (urlStr.contains('arbpay.me') && urlStr.isNotEmpty) {
-      if (mounted) setState(() => _loginReady = true);
-    }
+  Future<void> _handleUrlChange(InAppWebViewController c, String url) async {
+    _webController = c;
+    final isLogin = url.contains('login') || url == 'https://arbpay.me/' ||
+        url == 'https://arbpay.me/#/' || url.endsWith('arbpay.me');
+    if (isLogin) { await _autoFill(c); if (mounted) setState(() => _loginReady = false); }
+    else if (url.contains('arbpay.me')) { if (mounted) setState(() => _loginReady = true); }
   }
 
-  Future<void> _autoFillLogin(InAppWebViewController controller) async {
+  Future<void> _autoFill(InAppWebViewController c) async {
     final phone = _phoneCtrl.text.trim();
     final pass  = _passCtrl.text;
     if (phone.isEmpty || pass.isEmpty) return;
-    final appState = context.read<AppState>();
-    for (int attempt = 0; attempt < 15; attempt++) {
+    final s = context.read<AppState>();
+    for (int i = 0; i < 15; i++) {
       await Future.delayed(const Duration(milliseconds: 800));
-      final safePhone = phone.replaceAll('"', r'\"');
-      final safePass  = pass.replaceAll('"', r'\"');
-      final result = await controller.evaluateJavascript(source: '''
-        (function() {
-          function nativeSet(el, val) {
-            var proto = Object.getPrototypeOf(el);
-            var desc = Object.getOwnPropertyDescriptor(proto, 'value');
-            if (desc && desc.set) { desc.set.call(el, val); } else { el.value = val; }
-            el.dispatchEvent(new Event('input',  {bubbles:true}));
-            el.dispatchEvent(new Event('change', {bubbles:true}));
-            el.dispatchEvent(new Event('blur',   {bubbles:true}));
-          }
-          var inputs = Array.from(document.querySelectorAll('input'));
-          var phoneEl = inputs.find(function(i){
-            var hint = ((i.placeholder||'')+(i.name||'')+(i.id||'')).toLowerCase();
-            return hint.match(/phone|mobile|user|account|login|tel/) && i.type !== 'password';
-          });
-          if (!phoneEl) phoneEl = inputs.find(function(i){
-            return i.type !== 'password' && i.type !== 'hidden' &&
-                   i.type !== 'submit' && i.type !== 'checkbox' && i.type !== 'radio';
-          });
-          var passEl = inputs.find(function(i){ return i.type === 'password'; });
-          if (!phoneEl && !passEl) return 'NO_INPUTS_AT_ALL';
-          if (!phoneEl) return 'NO_PHONE_INPUT';
-          if (!passEl)  return 'NO_PASS_INPUT';
-          nativeSet(phoneEl, "$safePhone");
-          nativeSet(passEl,  "$safePass");
-          return 'FILLED';
+      final sp = phone.replaceAll('"', r'\"');
+      final sw = pass.replaceAll('"', r'\"');
+      final r = await c.evaluateJavascript(source: '''
+        (function(){
+          function set(el,v){var p=Object.getPrototypeOf(el),d=Object.getOwnPropertyDescriptor(p,'value');
+            if(d&&d.set)d.set.call(el,v);else el.value=v;
+            ['input','change','blur'].forEach(function(e){el.dispatchEvent(new Event(e,{bubbles:true}));});}
+          var ins=Array.from(document.querySelectorAll('input'));
+          var ph=ins.find(function(i){var h=((i.placeholder||'')+(i.name||'')+(i.id||'')).toLowerCase();
+            return h.match(/phone|mobile|user|account|login|tel/)&&i.type!=='password';});
+          if(!ph)ph=ins.find(function(i){return i.type!=='password'&&i.type!=='hidden'&&i.type!=='submit';});
+          var pw=ins.find(function(i){return i.type==='password';});
+          if(!ph||!pw)return 'FAIL';
+          set(ph,"$sp");set(pw,"$sw");return 'FILLED';
         })();
       ''');
-      final res = result?.toString().replaceAll('"', '') ?? '';
-      if (res.startsWith('FILLED')) {
-        appState.addLog('Autofill success', level: LogLevel.success);
-        break;
-      }
-      if (attempt == 14) appState.addLog('Autofill failed: $res', level: LogLevel.warning);
+      if ((r?.toString() ?? '').contains('FILLED')) { s.addLog('Autofill success', level: LogLevel.success); break; }
+      if (i == 14) s.addLog('Autofill failed', level: LogLevel.warning);
     }
   }
 
-  _StatusInfo _statusInfo(BotStatus status) {
-    switch (status) {
-      case BotStatus.idle:       return _StatusInfo('IDLE', _greyDim);
+  _StatusInfo _statusInfo(BotStatus s, AppTheme t) {
+    switch (s) {
+      case BotStatus.idle:       return _StatusInfo('IDLE', t.textDim);
       case BotStatus.connecting: return _StatusInfo('CONNECTING', const Color(0xFF42A5F5));
       case BotStatus.cloudflare: return _StatusInfo('CF CHALLENGE', const Color(0xFFFFA726));
       case BotStatus.loggingIn:  return _StatusInfo('LOGGING IN', const Color(0xFF42A5F5));
-      case BotStatus.capturing:  return _StatusInfo('CAPTURING TOKEN', _yellow);
-      case BotStatus.running:    return _StatusInfo('RUNNING', _yellow);
-      case BotStatus.qrReady:    return _StatusInfo('QR READY — PAY NOW', _green);
-      case BotStatus.success:    return _StatusInfo('SUCCESS', _green);
-      case BotStatus.error:      return _StatusInfo('ERROR', _red);
+      case BotStatus.capturing:  return _StatusInfo('CAPTURING TOKEN', t.yellow);
+      case BotStatus.running:    return _StatusInfo('RUNNING', t.yellow);
+      case BotStatus.qrReady:    return _StatusInfo('QR READY — PAY NOW', t.green);
+      case BotStatus.success:    return _StatusInfo('SUCCESS', t.green);
+      case BotStatus.error:      return _StatusInfo('ERROR', t.red);
     }
   }
 }
 
 // ── Stat card ──────────────────────────────────────────────────────────────────
 class _StatCard extends StatelessWidget {
-  final String label;
-  final String value;
+  final String label, value;
   final IconData icon;
   final Color color;
+  final AppTheme t;
   const _StatCard({required this.label, required this.value,
-    required this.icon, required this.color});
+    required this.icon, required this.color, required this.t});
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
         decoration: BoxDecoration(
-          color: _card,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: _border),
+          color: t.card, borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: t.border),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: color, size: 16),
-            const SizedBox(height: 8),
-            Text(value,
-              style: TextStyle(
-                color: color, fontSize: 22,
-                fontWeight: FontWeight.bold)),
-            const SizedBox(height: 2),
-            Text(label,
-              style: const TextStyle(
-                color: _grey, fontSize: 9, letterSpacing: 1.2)),
-          ],
-        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(height: 8),
+          Text(value, style: TextStyle(color: color, fontSize: 22, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(label, style: TextStyle(color: t.textSub, fontSize: 9, letterSpacing: 1.2)),
+        ]),
       ),
     );
   }
 }
 
 // ── Primary button ─────────────────────────────────────────────────────────────
-class _PrimaryButton extends StatelessWidget {
+class _PrimaryBtn extends StatelessWidget {
   final String label;
   final IconData icon;
+  final AppTheme t;
   final VoidCallback onTap;
-  const _PrimaryButton({super.key, required this.label,
-    required this.icon, required this.onTap});
+  const _PrimaryBtn({super.key, required this.label, required this.icon,
+    required this.t, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
         width: double.infinity, height: 56,
         decoration: BoxDecoration(
-          color: _yellow,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: _yellow.withValues(alpha: 0.25),
-              blurRadius: 20, spreadRadius: 0, offset: const Offset(0, 6)),
-          ],
+          color: t.yellow, borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: t.yellow.withValues(alpha: 0.25),
+            blurRadius: 20, offset: const Offset(0, 6))],
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: _bg, size: 22),
-            const SizedBox(width: 10),
-            Text(label, style: const TextStyle(
-              color: _bg, fontWeight: FontWeight.bold,
-              fontSize: 15, letterSpacing: 1.2)),
-          ],
-        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, color: t.bg, size: 22),
+          const SizedBox(width: 10),
+          Text(label, style: TextStyle(color: t.bg, fontWeight: FontWeight.bold,
+            fontSize: 15, letterSpacing: 1.2)),
+        ]),
       ),
     );
   }
 }
 
 // ── Outline button ─────────────────────────────────────────────────────────────
-class _OutlineButton extends StatelessWidget {
+class _OutlineBtn extends StatelessWidget {
   final String label;
   final IconData icon;
   final Color color;
+  final AppTheme t;
   final VoidCallback onTap;
-  const _OutlineButton({required this.label, required this.icon,
-    required this.color, required this.onTap});
+  const _OutlineBtn({required this.label, required this.icon,
+    required this.color, required this.t, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
         width: double.infinity, height: 56,
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: color.withValues(alpha: 0.4)),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 22),
-            const SizedBox(width: 10),
-            Text(label, style: TextStyle(
-              color: color, fontWeight: FontWeight.bold,
-              fontSize: 15, letterSpacing: 1.2)),
-          ],
-        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(width: 10),
+          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold,
+            fontSize: 15, letterSpacing: 1.2)),
+        ]),
       ),
     );
   }
 }
 
-// ── Status info ────────────────────────────────────────────────────────────────
-class _StatusInfo {
-  final String label;
-  final Color color;
-  _StatusInfo(this.label, this.color);
-}
+class _StatusInfo { final String label; final Color color; _StatusInfo(this.label, this.color); }
 
-// ── Logs bottom sheet ──────────────────────────────────────────────────────────
+// ── Logs sheet ─────────────────────────────────────────────────────────────────
 class _LogsSheet extends StatelessWidget {
+  final AppTheme t;
+  const _LogsSheet({required this.t});
+
   @override
   Widget build(BuildContext context) {
-    return Consumer<AppState>(
-      builder: (context, state, _) {
-        final logs = state.logs;
-        return Container(
-          height: MediaQuery.of(context).size.height * 0.75,
-          decoration: const BoxDecoration(
-            color: _surface,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    return Consumer<AppState>(builder: (context, state, _) {
+      final logs = state.logs;
+      return AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        height: MediaQuery.of(context).size.height * 0.75,
+        decoration: BoxDecoration(
+          color: t.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(children: [
+          Container(margin: const EdgeInsets.only(top: 12, bottom: 8),
+            width: 36, height: 4,
+            decoration: BoxDecoration(color: t.textDim, borderRadius: BorderRadius.circular(2))),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+            child: Row(children: [
+              Icon(Icons.terminal, color: t.yellow, size: 16),
+              const SizedBox(width: 8),
+              Text('Live Log', style: TextStyle(color: t.yellow, fontSize: 15,
+                fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+              const Spacer(),
+              GestureDetector(
+                onTap: () {
+                  if (logs.isEmpty) return;
+                  Clipboard.setData(ClipboardData(
+                    text: logs.reversed.map((e) => '[${e.time}] ${e.message}').join('\n')));
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('${logs.length} lines copied',
+                      style: TextStyle(color: t.bg)),
+                    backgroundColor: t.yellow, behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))));
+                },
+                child: Text('COPY', style: TextStyle(color: t.textSub, fontSize: 11, letterSpacing: 1)),
+              ),
+              const SizedBox(width: 14),
+              GestureDetector(onTap: () => state.clearLogs(),
+                child: Text('CLEAR', style: TextStyle(color: t.textSub, fontSize: 11, letterSpacing: 1))),
+              const SizedBox(width: 14),
+              GestureDetector(onTap: () => Navigator.pop(context),
+                child: Icon(Icons.close_rounded, color: t.textSub, size: 20)),
+            ]),
           ),
-          child: Column(
-            children: [
-              Container(
-                margin: const EdgeInsets.only(top: 12, bottom: 8),
-                width: 36, height: 4,
-                decoration: BoxDecoration(
-                  color: _greyDim, borderRadius: BorderRadius.circular(2)),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-                child: Row(
-                  children: [
-                    const Icon(Icons.terminal, color: _yellow, size: 16),
-                    const SizedBox(width: 8),
-                    const Text('Live Log', style: TextStyle(
-                      color: _yellow, fontSize: 15,
-                      fontWeight: FontWeight.bold, letterSpacing: 1.0)),
-                    const Spacer(),
-                    GestureDetector(
-                      onTap: () {
-                        if (logs.isEmpty) return;
-                        Clipboard.setData(ClipboardData(
-                          text: logs.reversed.map((e) => '[${e.time}] ${e.message}').join('\n')));
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text('${logs.length} lines copied',
-                            style: const TextStyle(color: _bg)),
-                          backgroundColor: _yellow,
-                          behavior: SnackBarBehavior.floating,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ));
-                      },
-                      child: const Text('COPY', style: TextStyle(
-                        color: _grey, fontSize: 11, letterSpacing: 1)),
-                    ),
-                    const SizedBox(width: 14),
-                    GestureDetector(
-                      onTap: () => state.clearLogs(),
-                      child: const Text('CLEAR', style: TextStyle(
-                        color: _grey, fontSize: 11, letterSpacing: 1)),
-                    ),
-                    const SizedBox(width: 14),
-                    GestureDetector(
-                      onTap: () => Navigator.pop(context),
-                      child: const Icon(Icons.close_rounded, color: _grey, size: 20),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(color: _border, height: 1),
-              Expanded(
-                child: logs.isEmpty
-                    ? Center(child: Text('No logs yet',
-                        style: TextStyle(color: _greyDim, fontSize: 13)))
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        itemCount: logs.length,
-                        itemBuilder: (_, i) {
-                          final e = logs[i];
-                          final color = _logColor(e.level);
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(e.time, style: const TextStyle(
-                                  color: _greyDim, fontSize: 10, fontFamily: 'monospace')),
-                                const SizedBox(width: 8),
-                                Icon(_logIcon(e.level), size: 11, color: color),
-                                const SizedBox(width: 6),
-                                Expanded(child: Text(e.message, style: TextStyle(
-                                  color: color, fontSize: 12,
-                                  fontFamily: 'monospace', height: 1.4))),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
+          Divider(color: t.border, height: 1),
+          Expanded(
+            child: logs.isEmpty
+                ? Center(child: Text('No logs yet', style: TextStyle(color: t.textDim, fontSize: 13)))
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    itemCount: logs.length,
+                    itemBuilder: (_, i) {
+                      final e = logs[i];
+                      final color = _logColor(e.level);
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+                        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(e.time, style: TextStyle(color: t.textDim, fontSize: 10, fontFamily: 'monospace')),
+                          const SizedBox(width: 8),
+                          Icon(_logIcon(e.level), size: 11, color: color),
+                          const SizedBox(width: 6),
+                          Expanded(child: Text(e.message, style: TextStyle(
+                            color: color, fontSize: 12, fontFamily: 'monospace', height: 1.4))),
+                        ]),
+                      );
+                    }),
           ),
-        );
-      },
-    );
+        ]),
+      );
+    });
   }
 
   Color _logColor(LogLevel l) {
     switch (l) {
-      case LogLevel.success: return const Color(0xFF00E676);
-      case LogLevel.warning: return const Color(0xFFFFA726);
-      case LogLevel.error:   return const Color(0xFFFF4444);
-      case LogLevel.info:    return const Color(0xFF8888A0);
+      case LogLevel.success: return t.logSuccess;
+      case LogLevel.warning: return t.logWarning;
+      case LogLevel.error:   return t.logError;
+      case LogLevel.info:    return t.logInfo;
     }
   }
 
