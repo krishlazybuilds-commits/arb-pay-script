@@ -36,7 +36,8 @@ class ArbPayService {
     if (_running) return;
     _running = true;
     _state?.setStatus(BotStatus.capturing);
-    _log('Capturing token from active session...', level: LogLevel.info);
+    final mode = _state?.paymentMode == PaymentMode.bank ? 'Bank' : 'OTP/UPI';
+    _log('Capturing token from active session... [Mode: $mode]', level: LogLevel.info);
 
     try {
       await _buildApiSession();
@@ -177,7 +178,11 @@ class ArbPayService {
 
   // ── Buy loop ───────────────────────────────────────────────────────────────
   Future<void> _runBuyLoop(int amtMin, int amtMax) async {
-    _log('Buy loop started (₹$amtMin - ₹$amtMax)', level: LogLevel.success);
+    final isBank = _state?.paymentMode == PaymentMode.bank;
+    final orderType = isBank ? 2 : 1;
+    final payType   = isBank ? '2' : '3';
+    final modeLabel = isBank ? 'Bank' : 'OTP/UPI';
+    _log('Buy loop started (₹$amtMin - ₹$amtMax) [Mode: $modeLabel]', level: LogLevel.success);
     _log('Token last 12: ...${_token.length > 12 ? _token.substring(_token.length - 12) : _token}',
         level: LogLevel.info);
     _log('deviceCode: ${_deviceCode.isEmpty ? "(empty)" : _deviceCode}',
@@ -203,7 +208,7 @@ class ArbPayService {
       // ── buyList — verbose on first call and every 10 attempts ─────────────
       buyListCallCount++;
       final isVerbose = buyListCallCount <= 3 || buyListCallCount % 10 == 0;
-      final orders = await _getOrderList(amtMin, amtMax, verbose: isVerbose);
+      final orders = await _getOrderList(amtMin, amtMax, orderType: orderType, verbose: isVerbose);
 
       if (orders.isEmpty) {
         emptyStreak++;
@@ -251,6 +256,7 @@ class ArbPayService {
       final currentBank = _bankCodes[_bankIndex % _bankCodes.length];
       verboseBuyCount++;
       final buyResp = await _apiBuy(platformOrder, amount, currentBank,
+          payType: payType, orderType: orderType,
           verbose: verboseBuyCount <= 5);
 
       // Always log the full raw buy response for the first 5, then every unique code
@@ -437,10 +443,10 @@ class ArbPayService {
 
   // ── Order list ─────────────────────────────────────────────────────────────
   Future<List<Map<String, dynamic>>> _getOrderList(int amtMin, int amtMax,
-      {bool verbose = false}) async {
+      {int orderType = 1, bool verbose = false}) async {
     final data = await _post(
       '/ar-wallet/buyCenter/buyList',
-      {'orderType': 1, 'pageNo': 1},
+      {'orderType': orderType, 'pageNo': 1},
       verbose: verbose,
     );
 
@@ -499,14 +505,14 @@ class ArbPayService {
 
   Future<Map<String, dynamic>> _apiBuy(
       String platformOrder, int amount, String bankCode,
-      {bool verbose = false}) async {
+      {String payType = '3', int orderType = 1, bool verbose = false}) async {
     final resp = await _post(
       '/ar-wallet/buyCenter/buy',
       {
         'amount': amount,
         'platformOrder': platformOrder,
-        'payType': '3',
-        'orderType': 1,
+        'payType': payType,
+        'orderType': orderType,
         'buyBankCode': bankCode,
         'buyerKycId': 0,
       },

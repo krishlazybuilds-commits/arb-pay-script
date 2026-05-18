@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 
 enum BotStatus { idle, connecting, cloudflare, loggingIn, capturing, running, qrReady, success, error }
 
+enum PaymentMode { upi, bank }
+
 class LogEntry {
   final String time;
   final String message;
@@ -25,6 +27,7 @@ class AppState extends ChangeNotifier {
   String password = '';
   int amountMin = 1700;
   int amountMax = 2000;
+  PaymentMode paymentMode = PaymentMode.upi;
 
   BotStatus get status => _status;
   List<LogEntry> get logs => List.unmodifiable(_logs);
@@ -32,6 +35,15 @@ class AppState extends ChangeNotifier {
   int get attempts => _attempts;
   int get successCount => _successCount;
   String get currentOrder => _currentOrder;
+
+  // Derived API values based on payment mode
+  int get orderType => paymentMode == PaymentMode.upi ? 1 : 2;
+  String get payType => paymentMode == PaymentMode.upi ? '3' : '1';
+
+  void setPaymentMode(PaymentMode mode) {
+    paymentMode = mode;
+    notifyListeners();
+  }
 
   void setStatus(BotStatus s) {
     _status = s;

@@ -24,6 +24,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   late TextEditingController _amtMinCtrl;
   late TextEditingController _amtMaxCtrl;
   bool _obscurePassword = true;
+  late PaymentMode _paymentMode;
 
   @override
   void initState() {
@@ -33,6 +34,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _passwordCtrl = TextEditingController(text: state.password);
     _amtMinCtrl   = TextEditingController(text: state.amountMin.toString());
     _amtMaxCtrl   = TextEditingController(text: state.amountMax.toString());
+    _paymentMode  = state.paymentMode;
   }
 
   @override
@@ -46,16 +48,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _save() async {
     final state = context.read<AppState>();
-    state.phone     = _phoneCtrl.text.trim();
-    state.password  = _passwordCtrl.text;
-    state.amountMin = int.tryParse(_amtMinCtrl.text) ?? 1700;
-    state.amountMax = int.tryParse(_amtMaxCtrl.text) ?? 2000;
+    state.phone        = _phoneCtrl.text.trim();
+    state.password     = _passwordCtrl.text;
+    state.amountMin    = int.tryParse(_amtMinCtrl.text) ?? 1700;
+    state.amountMax    = int.tryParse(_amtMaxCtrl.text) ?? 2000;
+    state.setPaymentMode(_paymentMode);
 
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('phone',    state.phone);
-    await prefs.setString('password', state.password);
-    await prefs.setInt('amtMin',      state.amountMin);
-    await prefs.setInt('amtMax',      state.amountMax);
+    await prefs.setString('phone',       state.phone);
+    await prefs.setString('password',    state.password);
+    await prefs.setInt('amtMin',         state.amountMin);
+    await prefs.setInt('amtMax',         state.amountMax);
+    await prefs.setString('paymentMode', _paymentMode == PaymentMode.bank ? 'bank' : 'upi');
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -148,6 +152,93 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
           const SizedBox(height: 28),
+          _SectionHeader('Payment Mode'),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: _surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _border),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _paymentMode = PaymentMode.upi),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        color: _paymentMode == PaymentMode.upi ? _green : Colors.transparent,
+                        borderRadius: const BorderRadius.horizontal(left: Radius.circular(11)),
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(Icons.phone_android,
+                            color: _paymentMode == PaymentMode.upi
+                                ? const Color(0xFF1A1A1A) : _textSub,
+                            size: 20),
+                          const SizedBox(height: 4),
+                          Text('OTP / UPI',
+                            style: TextStyle(
+                              color: _paymentMode == PaymentMode.upi
+                                  ? const Color(0xFF1A1A1A) : _textSub,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            )),
+                          const SizedBox(height: 2),
+                          Text('payType: 3 · orderType: 1',
+                            style: TextStyle(
+                              color: _paymentMode == PaymentMode.upi
+                                  ? const Color(0xFF1A1A1A).withValues(alpha: 0.6) : _textHint,
+                              fontSize: 9,
+                            )),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Container(width: 1, height: 60, color: _border),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _paymentMode = PaymentMode.bank),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        color: _paymentMode == PaymentMode.bank ? _green : Colors.transparent,
+                        borderRadius: const BorderRadius.horizontal(right: Radius.circular(11)),
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(Icons.account_balance,
+                            color: _paymentMode == PaymentMode.bank
+                                ? const Color(0xFF1A1A1A) : _textSub,
+                            size: 20),
+                          const SizedBox(height: 4),
+                          Text('Bank',
+                            style: TextStyle(
+                              color: _paymentMode == PaymentMode.bank
+                                  ? const Color(0xFF1A1A1A) : _textSub,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            )),
+                          const SizedBox(height: 2),
+                          Text('payType: 1 · orderType: 2',
+                            style: TextStyle(
+                              color: _paymentMode == PaymentMode.bank
+                                  ? const Color(0xFF1A1A1A).withValues(alpha: 0.6) : _textHint,
+                              fontSize: 9,
+                            )),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 28),
           _SectionHeader('Info'),
           const SizedBox(height: 12),
           Container(
@@ -158,8 +249,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               border: Border.all(color: _border),
             ),
             child: const Text(
-              'The bot will attempt to buy ARB tokens in the specified amount range using OTP-UPI method. '
-              'It cycles through all available UPI banks automatically. '
+              'OTP/UPI mode: cycles through UPI banks (payType 3, orderType 1).\n'
+              'Bank mode: uses bank transfer orders (payType 1, orderType 2).\n'
               'When an order is claimed, the QR payment screen will appear.',
               style: TextStyle(color: _textSub, fontSize: 12, height: 1.6),
             ),

@@ -19,7 +19,7 @@ Future<void> _clearWebViewSession() async {
 }
 
 // ── Build version (bump every time a new APK is built) ─────────────────────────
-const kBuildVersion = 'v1.0.6';
+const kBuildVersion = 'v1.0.7';
 
 // ── Palette ────────────────────────────────────────────────────────────────────
 const _green     = Color(0xFFFFD600);

@@ -32,6 +32,14 @@ arbpay_apk/windows/flutter/generated_plugins.cmake
 .DS_Store
 Thumbs.db
 
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# API log files (generated at runtime)
+api_logs_*.txt
+
 # Secrets
 .env
 

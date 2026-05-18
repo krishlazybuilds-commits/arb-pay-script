@@ -15,6 +15,7 @@ except ImportError:
 
 import requests as req_lib
 
+import undetected_chromedriver as uc
 from selenium import webdriver
 from selenium.common.exceptions import ElementClickInterceptedException, TimeoutException
 from selenium.webdriver.chrome.options import Options as ChromeOptions
@@ -49,12 +50,9 @@ def build_driver(browser: str, headless: bool):
     log(f"Starting {browser} browser")
     common_args = [
         "--start-maximized",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-extensions",
-        "--disable-gpu",
         "--no-sandbox",
+        "--disable-gpu",
         "--disable-dev-shm-usage",
-        "--disable-infobars",
         "--disable-notifications",
         "--disable-popup-blocking",
     ]
@@ -67,14 +65,14 @@ def build_driver(browser: str, headless: bool):
             options.add_argument(arg)
         return webdriver.Edge(service=EdgeService(), options=options)
 
-    options = ChromeOptions()
-    options.add_experimental_option("detach", True)
+    # Use undetected_chromedriver to bypass Cloudflare bot detection
+    options = uc.ChromeOptions()
     options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
     if headless:
         options.add_argument("--headless=new")
     for arg in common_args:
         options.add_argument(arg)
-    return webdriver.Chrome(service=ChromeService(), options=options)
+    return uc.Chrome(options=options, use_subprocess=True)
 
 
 # ── API layer — all calls run inside Chrome via fetch() to bypass Cloudflare ──

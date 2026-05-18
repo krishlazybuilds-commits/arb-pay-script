@@ -4,17 +4,19 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'models/app_state.dart';
 import 'screens/home_screen.dart';
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
   final prefs = await SharedPreferences.getInstance();
   final state = AppState();
-  state.phone     = prefs.getString('phone')    ?? '';
-  state.password  = prefs.getString('password') ?? '';
-  state.amountMin = prefs.getInt('amtMin')      ?? 1700;
-  state.amountMax = prefs.getInt('amtMax')      ?? 2000;
+  state.phone       = prefs.getString('phone')    ?? '';
+  state.password    = prefs.getString('password') ?? '';
+  state.amountMin   = prefs.getInt('amtMin')      ?? 1700;
+  state.amountMax   = prefs.getInt('amtMax')      ?? 2000;
+  state.paymentMode = (prefs.getString('paymentMode') == 'bank')
+      ? PaymentMode.bank
+      : PaymentMode.upi;
 
   runApp(
     ChangeNotifierProvider.value(
