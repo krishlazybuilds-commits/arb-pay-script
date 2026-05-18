@@ -135,10 +135,33 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   controller: _passCtrl, label: 'Password',
                   icon: Icons.lock_outline_rounded, t: t,
                   obscure: _obscurePass, enabled: !_isRunning,
-                  suffix: IconButton(
-                    icon: Icon(_obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                      color: t.textDim, size: 18),
-                    onPressed: () => setState(() => _obscurePass = !_obscurePass),
+                  suffix: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (!_obscurePass)
+                        IconButton(
+                          icon: Icon(Icons.copy_rounded, color: t.textDim, size: 16),
+                          tooltip: 'Copy password',
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: _passCtrl.text));
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                              content: Text('Password copied',
+                                style: TextStyle(color: t.bg)),
+                              backgroundColor: t.yellow,
+                              behavior: SnackBarBehavior.floating,
+                              duration: const Duration(seconds: 2),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                            ));
+                          },
+                        ),
+                      IconButton(
+                        icon: Icon(
+                          _obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                          color: t.textDim, size: 18),
+                        onPressed: () => setState(() => _obscurePass = !_obscurePass),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 20),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_state.dart';
@@ -132,10 +133,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _DarkField(
                 label: 'Password', controller: _passwordCtrl,
                 icon: Icons.lock_outline_rounded, obscureText: _obscurePassword, t: t,
-                suffixIcon: IconButton(
-                  icon: Icon(_obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                    color: t.textDim, size: 18),
-                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!_obscurePassword)
+                      IconButton(
+                        icon: Icon(Icons.copy_rounded, color: t.textDim, size: 16),
+                        tooltip: 'Copy password',
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: _passwordCtrl.text));
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                            content: Text('Password copied',
+                              style: TextStyle(color: t.bg)),
+                            backgroundColor: t.yellow,
+                            behavior: SnackBarBehavior.floating,
+                            duration: const Duration(seconds: 2),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                          ));
+                        },
+                      ),
+                    IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        color: t.textDim, size: 18),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 28),
@@ -158,11 +184,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   border: Border.all(color: t.border),
                 ),
                 child: Row(children: [
-                  _ModeTab(label: 'OTP / UPI', subLabel: 'payType: 3 · orderType: 1',
+                  _ModeTab(label: 'OTP / UPI', subLabel: 'Cycles through UPI banks',
                     icon: Icons.currency_rupee_rounded, selected: _paymentMode == PaymentMode.upi,
                     isLeft: true, t: t, onTap: () => setState(() => _paymentMode = PaymentMode.upi)),
                   Container(width: 0.5, height: 72, color: t.border),
-                  _ModeTab(label: 'Bank', subLabel: 'payType: 1 · orderType: 2',
+                  _ModeTab(label: 'Bank', subLabel: 'Direct bank transfer',
                     icon: Icons.account_balance_rounded, selected: _paymentMode == PaymentMode.bank,
                     isLeft: false, t: t, onTap: () => setState(() => _paymentMode = PaymentMode.bank)),
                 ]),
@@ -184,7 +210,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 14),
                   _InfoRow(icon: Icons.account_balance_rounded, color: t.green, t: t,
                     title: 'Bank mode',
-                    desc: 'Buys bank transfer orders. Uses payType=1 and orderType=2.'),
+                    desc: 'Buys bank transfer orders using direct bank transfer.'),
                   const SizedBox(height: 14),
                   _InfoRow(icon: Icons.info_outline_rounded, color: t.textSub, t: t,
                     title: 'On success',
