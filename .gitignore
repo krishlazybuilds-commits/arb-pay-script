@@ -18,8 +18,15 @@ arbpay_apk/android/key.properties
 *.iml
 .vscode/
 .kiro/
+.cursor/
 *.suo
 *.user
+
+# Flutter generated plugin registrant files
+arbpay_apk/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+arbpay_apk/windows/flutter/generated_plugin_registrant.cc
+arbpay_apk/windows/flutter/generated_plugin_registrant.h
+arbpay_apk/windows/flutter/generated_plugins.cmake
 
 # OS
 .DS_Store
