@@ -207,7 +207,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: Image.asset(
-                'assets/images/app_icon.png',
+                state.isDark
+                    ? 'assets/images/app_icon_dark.png'
+                    : 'assets/images/app_icon_light.png',
                 width: 38, height: 38, fit: BoxFit.cover),
             ),
           ),
