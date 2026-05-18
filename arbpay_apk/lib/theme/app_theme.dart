@@ -17,8 +17,9 @@ class AppTheme {
   Color get textDim     => isDark ? const Color(0xFF3A3A50) : const Color(0xFFBBBBCC);
 
   // ── Accent ─────────────────────────────────────────────────────────────────
-  Color get yellow    => const Color(0xFFFFCC00);
-  Color get yellowDim => isDark ? const Color(0x33FFCC00) : const Color(0x1AFFCC00);
+  // Dark: bright yellow. Light: deeper amber for contrast on white.
+  Color get yellow    => isDark ? const Color(0xFFFFCC00) : const Color(0xFFB8860B);
+  Color get yellowDim => isDark ? const Color(0x33FFCC00) : const Color(0xFFFFF3CC);
 
   // ── Status ─────────────────────────────────────────────────────────────────
   Color get red   => const Color(0xFFFF4444);

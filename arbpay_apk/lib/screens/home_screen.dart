@@ -180,8 +180,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   // ── Header ─────────────────────────────────────────────────────────────────
   Widget _buildHeader(AppState state, AppTheme t) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
+    return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
         color: t.bg,
@@ -242,8 +241,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 _passCtrl.text  = s.password;
               }
             }),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
+            child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
                 color: t.card,
@@ -283,8 +281,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       required AppTheme t, VoidCallback? onTap}) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
+      child: Container(
         width: 36, height: 36,
         decoration: BoxDecoration(
           color: t.card,
@@ -302,8 +299,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final isActive = [BotStatus.running, BotStatus.capturing,
       BotStatus.connecting, BotStatus.loggingIn].contains(state.status);
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
+    return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: t.card,
@@ -339,8 +335,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ],
         )),
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
+        Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
             color: t.bg,
@@ -401,8 +396,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     required IconData icon, required AppTheme t,
     bool obscure = false, bool enabled = true, Widget? suffix,
   }) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
+    return Container(
       decoration: BoxDecoration(
         color: t.card, borderRadius: BorderRadius.circular(14),
         border: Border.all(color: t.border),
@@ -425,8 +419,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ── WebView ────────────────────────────────────────────────────────────────
   Widget _buildWebView(AppState state, AppTheme t) {
     return Column(children: [
-      AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
+      Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         color: t.bg,
         child: Row(children: [
@@ -437,8 +430,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 16))),
           GestureDetector(
             onTap: () => _showLogsSheet(state, t),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 300),
+            child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: t.yellowDim, borderRadius: BorderRadius.circular(8),
@@ -455,8 +447,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ]),
       ),
       Container(height: 0.5, color: t.border),
-      AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
+      Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         color: t.surface,
         child: Row(children: [
@@ -478,8 +469,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         onLoadStop: (c, url) async { _webController = c; await _handleUrlChange(c, url?.toString() ?? ''); },
         onUpdateVisitedHistory: (c, url, _) async { await _handleUrlChange(c, url?.toString() ?? ''); },
       )),
-      AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
+      Container(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
         decoration: BoxDecoration(
           color: t.bg,
@@ -490,9 +480,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: _loginReady && !_isRunning
               ? _PrimaryBtn(key: const ValueKey('run'), label: 'RUN BOT',
                   icon: Icons.bolt_rounded, t: t, onTap: _completeCaptureAndRun)
-              : AnimatedContainer(
+              : Container(
                   key: const ValueKey('wait'),
-                  duration: const Duration(milliseconds: 300),
                   height: 56,
                   decoration: BoxDecoration(
                     color: t.card, borderRadius: BorderRadius.circular(16),
@@ -581,8 +570,7 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
+      child: Container(
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
         decoration: BoxDecoration(
           color: t.card, borderRadius: BorderRadius.circular(14),
@@ -613,8 +601,7 @@ class _PrimaryBtn extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
+      child: Container(
         width: double.infinity, height: 56,
         decoration: BoxDecoration(
           color: t.yellow, borderRadius: BorderRadius.circular(16),
@@ -646,8 +633,7 @@ class _OutlineBtn extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
+      child: Container(
         width: double.infinity, height: 56,
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.08),
@@ -676,8 +662,7 @@ class _LogsSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<AppState>(builder: (context, state, _) {
       final logs = state.logs;
-      return AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
+      return Container(
         height: MediaQuery.of(context).size.height * 0.75,
         decoration: BoxDecoration(
           color: t.surface,
@@ -762,3 +747,4 @@ class _LogsSheet extends StatelessWidget {
     }
   }
 }
+

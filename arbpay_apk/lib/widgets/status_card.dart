@@ -45,8 +45,7 @@ class _StatusCardState extends State<StatusCard>
             state.status == BotStatus.capturing ||
             state.status == BotStatus.cloudflare;
 
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
+        return Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: t.card,
@@ -141,8 +140,7 @@ class _StatChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
+    return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: t.bg,

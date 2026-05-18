@@ -91,8 +91,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   final prefs = await SharedPreferences.getInstance();
                   await prefs.setBool('isDark', state.isDark);
                 },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 300),
+                child: Container(
                   margin: const EdgeInsets.only(right: 8),
                   width: 36, height: 36,
                   decoration: BoxDecoration(
@@ -177,8 +176,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 28),
               _SectionLabel('PAYMENT MODE', t),
               const SizedBox(height: 12),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
+              Container(
                 decoration: BoxDecoration(
                   color: t.card, borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: t.border),
@@ -196,8 +194,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const SizedBox(height: 28),
               _SectionLabel('INFO', t),
               const SizedBox(height: 12),
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
+              Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   color: t.card, borderRadius: BorderRadius.circular(14),
@@ -257,8 +254,7 @@ class _DarkField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
+    return Container(
       decoration: BoxDecoration(
         color: t.card, borderRadius: BorderRadius.circular(14),
         border: Border.all(color: t.border),
@@ -338,8 +334,7 @@ class _InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
+      Container(
         width: 32, height: 32,
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.1),

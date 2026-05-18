@@ -13,8 +13,7 @@ class LogPanel extends StatelessWidget {
     return Consumer<AppState>(
       builder: (context, state, _) {
         final logs = state.logs;
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
+        return Container(
           decoration: BoxDecoration(
             color: t.card,
             borderRadius: BorderRadius.circular(14),
