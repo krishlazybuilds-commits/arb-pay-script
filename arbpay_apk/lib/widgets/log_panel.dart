@@ -3,11 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/app_state.dart';
 
-const _green    = Color(0xFFFFD600);
-const _surface  = Color(0xFFF5F5F5);
-const _border   = Color(0xFFE0E0E0);
-const _textSub  = Color(0xFF757575);
-const _textHint = Color(0xFFBDBDBD);
+const _yellow   = Color(0xFFFFCC00);
+const _bg       = Color(0xFF0A0A0F);
+const _card     = Color(0xFF1C1C26);
+const _border   = Color(0xFF2A2A38);
+const _grey     = Color(0xFF8888A0);
+const _greyDim  = Color(0xFF3A3A50);
 
 class LogPanel extends StatelessWidget {
   const LogPanel({super.key});
@@ -19,8 +20,8 @@ class LogPanel extends StatelessWidget {
         final logs = state.logs;
         return Container(
           decoration: BoxDecoration(
-            color: _surface,
-            borderRadius: BorderRadius.circular(12),
+            color: _card,
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(color: _border),
           ),
           child: Column(
@@ -29,14 +30,11 @@ class LogPanel extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 child: Row(
                   children: [
-                    const Icon(Icons.terminal, color: _green, size: 16),
+                    const Icon(Icons.terminal, color: _yellow, size: 14),
                     const SizedBox(width: 8),
-                    const Text('Live Log',
-                        style: TextStyle(
-                            color: _green,
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.2)),
+                    const Text('LIVE LOG', style: TextStyle(
+                      color: _yellow, fontSize: 11,
+                      fontWeight: FontWeight.bold, letterSpacing: 1.5)),
                     const Spacer(),
                     GestureDetector(
                       onTap: () {
@@ -45,43 +43,37 @@ class LogPanel extends StatelessWidget {
                             .map((e) => '[${e.time}] ${e.message}')
                             .join('\n');
                         Clipboard.setData(ClipboardData(text: text));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('${logs.length} log lines copied',
-                                style: const TextStyle(color: Color(0xFF1A1A1A))),
-                            backgroundColor: _green,
-                            duration: const Duration(seconds: 2),
-                            behavior: SnackBarBehavior.floating,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
-                          ),
-                        );
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text('${logs.length} lines copied',
+                            style: const TextStyle(color: Color(0xFF0A0A0F))),
+                          backgroundColor: _yellow,
+                          duration: const Duration(seconds: 2),
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8)),
+                        ));
                       },
-                      child: const Text('COPY',
-                          style: TextStyle(
-                              color: _textSub, fontSize: 11, letterSpacing: 1)),
+                      child: const Text('COPY', style: TextStyle(
+                        color: _grey, fontSize: 10, letterSpacing: 1)),
                     ),
                     const SizedBox(width: 12),
                     GestureDetector(
                       onTap: () => state.clearLogs(),
-                      child: const Text('CLEAR',
-                          style: TextStyle(
-                              color: _textSub, fontSize: 11, letterSpacing: 1)),
+                      child: const Text('CLEAR', style: TextStyle(
+                        color: _grey, fontSize: 10, letterSpacing: 1)),
                     ),
                   ],
                 ),
               ),
-              const Divider(color: _border, height: 1),
+              Divider(color: _border, height: 1),
               Expanded(
                 child: logs.isEmpty
-                    ? const Center(
-                        child: Text('No logs yet',
-                            style: TextStyle(color: _textHint, fontSize: 13)),
-                      )
+                    ? Center(child: Text('No logs yet',
+                        style: TextStyle(color: _greyDim, fontSize: 13)))
                     : ListView.builder(
                         padding: const EdgeInsets.symmetric(vertical: 6),
                         itemCount: logs.length,
-                        itemBuilder: (context, index) => _LogRow(entry: logs[index]),
+                        itemBuilder: (_, i) => _LogRow(entry: logs[i]),
                       ),
               ),
             ],
@@ -98,10 +90,10 @@ class _LogRow extends StatelessWidget {
 
   Color get _color {
     switch (entry.level) {
-      case LogLevel.success: return const Color(0xFFF9A825);
-      case LogLevel.warning: return const Color(0xFFF57F17);
-      case LogLevel.error:   return const Color(0xFFD32F2F);
-      case LogLevel.info:    return const Color(0xFF616161);
+      case LogLevel.success: return const Color(0xFF00E676);
+      case LogLevel.warning: return const Color(0xFFFFA726);
+      case LogLevel.error:   return const Color(0xFFFF4444);
+      case LogLevel.info:    return const Color(0xFF8888A0);
     }
   }
 
@@ -121,18 +113,14 @@ class _LogRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(entry.time,
-              style: const TextStyle(
-                  color: _textHint, fontSize: 10, fontFamily: 'monospace')),
+          Text(entry.time, style: const TextStyle(
+            color: _greyDim, fontSize: 10, fontFamily: 'monospace')),
           const SizedBox(width: 8),
-          Icon(_icon, size: 12, color: _color),
+          Icon(_icon, size: 11, color: _color),
           const SizedBox(width: 6),
-          Expanded(
-            child: Text(entry.message,
-                style: TextStyle(
-                    color: _color, fontSize: 12,
-                    fontFamily: 'monospace', height: 1.4)),
-          ),
+          Expanded(child: Text(entry.message, style: TextStyle(
+            color: _color, fontSize: 12,
+            fontFamily: 'monospace', height: 1.4))),
         ],
       ),
     );

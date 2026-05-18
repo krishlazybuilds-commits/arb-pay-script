@@ -28,6 +28,7 @@ class AppState extends ChangeNotifier {
   int amountMin = 1700;
   int amountMax = 2000;
   PaymentMode paymentMode = PaymentMode.upi;
+  bool isDark = true;
 
   BotStatus get status => _status;
   List<LogEntry> get logs => List.unmodifiable(_logs);
@@ -42,6 +43,11 @@ class AppState extends ChangeNotifier {
 
   void setPaymentMode(PaymentMode mode) {
     paymentMode = mode;
+    notifyListeners();
+  }
+
+  void toggleTheme() {
+    isDark = !isDark;
     notifyListeners();
   }
 
