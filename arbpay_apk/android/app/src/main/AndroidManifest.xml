@@ -34,8 +34,8 @@
             android:name=".MainActivityDark"
             android:targetActivity=".MainActivity"
             android:label="ARBPay Bot"
-            android:icon="@mipmap/ic_launcher"
-            android:roundIcon="@mipmap/ic_launcher_round"
+            android:icon="@mipmap/ic_launcher_light"
+            android:roundIcon="@mipmap/ic_launcher_light"
             android:exported="true"
             android:enabled="true">
             <intent-filter>
@@ -49,8 +49,8 @@
             android:name=".MainActivityLight"
             android:targetActivity=".MainActivity"
             android:label="ARBPay Bot"
-            android:icon="@mipmap/ic_launcher_light"
-            android:roundIcon="@mipmap/ic_launcher_light"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher_round"
             android:exported="true"
             android:enabled="false">
             <intent-filter>
