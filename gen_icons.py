@@ -1,138 +1,120 @@
 """
-Generate Material You style adaptive icon foregrounds for ARBPay Bot.
-- Dark icon:  #FFCC00 (yellow) ₹ symbol on transparent bg
-- Light icon: #0A0A0F (dark)   ₹ symbol on transparent bg
-
-The background color is set in the XML (ic_launcher_background / ic_launcher_dark_background).
-The foreground PNG is just the symbol with transparency — Android composites them.
-
-Adaptive icon foreground should be 108x108dp with the safe zone being the
-center 72x72dp circle. We generate at 4x scale then resize for each density.
+Generate Material You style app icons for ARBPay Bot.
+Uses Arial Black font for a clean, bold ₹ glyph.
 """
 
 from PIL import Image, ImageDraw, ImageFont
-import os, math
-
-# ── Config ────────────────────────────────────────────────────────────────────
-CANVAS   = 432   # 108dp * 4x — full adaptive icon canvas
-SAFE     = 288   # 72dp * 4x  — safe zone (what's always visible)
-PADDING  = 72    # extra padding inside safe zone for the symbol
-
-# Densities: (folder_suffix, scale_factor relative to mdpi=48px)
-DENSITIES = [
-    ('mdpi',    1.0,  48),
-    ('hdpi',    1.5,  72),
-    ('xhdpi',   2.0,  96),
-    ('xxhdpi',  3.0, 144),
-    ('xxxhdpi', 4.0, 192),
-]
+import os
 
 BASE = r'e:\arb-pay-script\arbpay_apk\android\app\src\main\res'
+ASSETS = r'e:\arb-pay-script\arbpay_apk\assets\images'
+FONT_PATH = r'C:\Windows\Fonts\ariblk.ttf'
 
-def draw_rupee(draw, cx, cy, size, color):
-    """Draw a clean ₹ symbol using geometric primitives."""
-    lw = max(2, size // 14)   # line width scales with size
-    s  = size * 0.72          # symbol bounding box
+# Densities: (folder, launcher_px)
+DENSITIES = [
+    ('mdpi',    48),
+    ('hdpi',    72),
+    ('xhdpi',   96),
+    ('xxhdpi',  144),
+    ('xxxhdpi', 192),
+]
 
-    x0 = cx - s/2
-    y0 = cy - s/2
-    x1 = cx + s/2
-    y1 = cy + s/2
-
-    top_y    = y0
-    bar1_y   = y0 + s * 0.22
-    bar2_y   = y0 + s * 0.44
-    bottom_y = y1
-
-    # Vertical stem
-    stem_x = x0 + s * 0.18
-    draw.line([(stem_x, top_y), (stem_x, bottom_y)], fill=color, width=lw)
-
-    # Top horizontal bar (full width)
-    draw.line([(x0, top_y), (x1, top_y)], fill=color, width=lw)
-
-    # Second horizontal bar
-    draw.line([(x0, bar1_y), (x1, bar1_y)], fill=color, width=lw)
-
-    # Arc for the "P" shape (top right)
-    arc_box = [stem_x, top_y, x1, bar1_y * 2 - top_y]
-    draw.arc(arc_box, start=270, end=90, fill=color, width=lw)
-
-    # Diagonal line from bar2 to bottom-right
-    draw.line([(x0, bar2_y), (x1, bottom_y)], fill=color, width=lw)
-
-    # Short bar at bar2 level
-    draw.line([(x0, bar2_y), (cx + s*0.1, bar2_y)], fill=color, width=lw)
+YELLOW = (255, 204, 0)
+DARK   = (10, 10, 15)
 
 
-def make_foreground(symbol_color, out_path, final_size):
-    """Create a foreground PNG: transparent bg + colored ₹ symbol."""
-    # Work at 4x then resize
-    img = Image.new('RGBA', (CANVAS, CANVAS), (0, 0, 0, 0))
+def make_icon(size, bg_color, symbol_color, path):
+    """
+    Flat rounded-square icon with a centered ₹ glyph.
+    Google Material You style — no gradients, no shadows.
+    """
+    img  = Image.new('RGBA', (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    cx = CANVAS // 2
-    cy = CANVAS // 2
-    symbol_size = SAFE - PADDING * 2
+    # Rounded square background (corner radius = 22% of size)
+    r = int(size * 0.22)
+    draw.rounded_rectangle([0, 0, size - 1, size - 1], radius=r, fill=bg_color + (255,))
 
-    draw_rupee(draw, cx, cy, symbol_size, symbol_color + (255,))
+    # Find font size that fills ~58% of the icon
+    target = int(size * 0.58)
+    font_size = target
+    font = ImageFont.truetype(FONT_PATH, font_size)
 
-    # Resize to target density size
-    img = img.resize((final_size, final_size), Image.LANCZOS)
-    img.save(out_path)
-    print(f'  Saved {out_path}')
+    # Measure and adjust
+    bbox = font.getbbox('₹')
+    glyph_w = bbox[2] - bbox[0]
+    glyph_h = bbox[3] - bbox[1]
+
+    # Scale font to fit target
+    scale = target / max(glyph_w, glyph_h)
+    font_size = int(font_size * scale)
+    font = ImageFont.truetype(FONT_PATH, font_size)
+    bbox = font.getbbox('₹')
+    glyph_w = bbox[2] - bbox[0]
+    glyph_h = bbox[3] - bbox[1]
+
+    # Center the glyph
+    x = (size - glyph_w) // 2 - bbox[0]
+    y = (size - glyph_h) // 2 - bbox[1]
+
+    draw.text((x, y), '₹', font=font, fill=symbol_color + (255,))
+    img.save(path)
+    print(f'  {os.path.basename(path)} ({size}px)')
 
 
-def make_flat_icon(bg_color, symbol_color, out_path, size):
-    """Create a flat PNG icon (for legacy mipmap fallback)."""
-    img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+def make_foreground(size, symbol_color, path):
+    """
+    Adaptive icon foreground — transparent bg, just the symbol.
+    Canvas is 2x the launcher size (adaptive icon spec).
+    """
+    canvas = size * 2
+    img  = Image.new('RGBA', (canvas, canvas), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # Rounded square background
-    r = size // 5  # corner radius
-    draw.rounded_rectangle([0, 0, size-1, size-1], radius=r, fill=bg_color + (255,))
+    target = int(canvas * 0.40)  # symbol fills 40% of adaptive canvas
+    font_size = target
+    font = ImageFont.truetype(FONT_PATH, font_size)
+    bbox = font.getbbox('₹')
+    glyph_w = bbox[2] - bbox[0]
+    glyph_h = bbox[3] - bbox[1]
+    scale = target / max(glyph_w, glyph_h)
+    font_size = int(font_size * scale)
+    font = ImageFont.truetype(FONT_PATH, font_size)
+    bbox = font.getbbox('₹')
+    glyph_w = bbox[2] - bbox[0]
+    glyph_h = bbox[3] - bbox[1]
 
-    # Symbol
-    draw_rupee(draw, size//2, size//2, int(size * 0.62), symbol_color + (255,))
+    x = (canvas - glyph_w) // 2 - bbox[0]
+    y = (canvas - glyph_h) // 2 - bbox[1]
 
-    img.save(out_path)
-    print(f'  Saved {out_path}')
+    draw.text((x, y), '₹', font=font, fill=symbol_color + (255,))
+    img.save(path)
+    print(f'  {os.path.basename(path)} ({canvas}px foreground)')
 
 
-print('Generating icons...')
+print('Generating icons...\n')
 
-for density, scale, px in DENSITIES:
+for density, px in DENSITIES:
     folder = os.path.join(BASE, f'mipmap-{density}')
+    print(f'[{density}]')
 
-    # Yellow foreground (for dark bg adaptive icon)
-    make_foreground(
-        symbol_color=(255, 204, 0),
-        out_path=os.path.join(folder, 'ic_launcher_foreground_yellow.png'),
-        final_size=px * 2,  # adaptive foreground is 2x the launcher size
-    )
+    # Light theme: yellow bg + dark symbol
+    make_icon(px, YELLOW, DARK,
+        os.path.join(folder, 'ic_launcher.png'))
+    make_icon(px, YELLOW, DARK,
+        os.path.join(folder, 'ic_launcher_round.png'))
 
-    # Dark foreground (for yellow bg adaptive icon)
-    make_foreground(
-        symbol_color=(10, 10, 15),
-        out_path=os.path.join(folder, 'ic_launcher_foreground.png'),
-        final_size=px * 2,
-    )
+    # Dark theme: dark bg + yellow symbol
+    make_icon(px, DARK, YELLOW,
+        os.path.join(folder, 'ic_launcher_light.png'))
 
-    # Flat legacy icons
-    make_flat_icon(
-        bg_color=(255, 204, 0), symbol_color=(10, 10, 15),
-        out_path=os.path.join(folder, 'ic_launcher.png'),
-        size=px,
-    )
-    make_flat_icon(
-        bg_color=(10, 10, 15), symbol_color=(255, 204, 0),
-        out_path=os.path.join(folder, 'ic_launcher_light.png'),
-        size=px,
-    )
-    make_flat_icon(
-        bg_color=(255, 204, 0), symbol_color=(10, 10, 15),
-        out_path=os.path.join(folder, 'ic_launcher_round.png'),
-        size=px,
-    )
+    # Adaptive foregrounds
+    make_foreground(px, DARK, os.path.join(folder, 'ic_launcher_foreground.png'))
+    make_foreground(px, YELLOW, os.path.join(folder, 'ic_launcher_foreground_yellow.png'))
+
+# In-app header icons (192px)
+print('\n[assets]')
+make_icon(192, DARK,   YELLOW, os.path.join(ASSETS, 'app_icon_dark.png'))
+make_icon(192, YELLOW, DARK,   os.path.join(ASSETS, 'app_icon_light.png'))
 
 print('\nDone!')
