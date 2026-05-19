@@ -29,7 +29,7 @@
               />
         </activity>
 
-        <!-- Dark theme launcher icon (default — enabled on launch) -->
+        <!-- Dark app theme → dark launcher icon (dark bg + white rupee) -->
         <activity-alias
             android:name=".MainActivityDark"
             android:targetActivity=".MainActivity"
@@ -44,7 +44,7 @@
             </intent-filter>
         </activity-alias>
 
-        <!-- Light theme launcher icon (disabled by default) -->
+        <!-- Light app theme → light launcher icon (yellow bg + black rupee) -->
         <activity-alias
             android:name=".MainActivityLight"
             android:targetActivity=".MainActivity"
