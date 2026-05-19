@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'models/app_state.dart';
 import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
+import 'services/icon_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,6 +20,9 @@ void main() async {
   state.paymentMode = (prefs.getString('paymentMode') == 'bank')
       ? PaymentMode.bank : PaymentMode.upi;
   state.isDark      = prefs.getBool('isDark') ?? true;
+
+  // Sync launcher icon with saved theme on startup
+  await IconService.setIcon(isDark: state.isDark);
 
   runApp(ChangeNotifierProvider.value(value: state, child: const ArbPayApp()));
 }

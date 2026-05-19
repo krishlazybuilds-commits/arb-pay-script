@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_state.dart';
 import '../theme/app_theme.dart';
+import '../services/icon_service.dart';
 
 // Keep local constants only for things that don't change with theme
 const _yellow = Color(0xFFFFCC00);
@@ -90,6 +91,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   state.toggleTheme();
                   final prefs = await SharedPreferences.getInstance();
                   await prefs.setBool('isDark', state.isDark);
+                  await IconService.setIcon(isDark: state.isDark);
                 },
                 child: Container(
                   margin: const EdgeInsets.only(right: 8),

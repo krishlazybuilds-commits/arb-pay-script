@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../models/app_state.dart';
 import '../services/arbpay_service.dart';
+import '../services/icon_service.dart';
 import '../widgets/log_panel.dart';
 import '../theme/app_theme.dart';
 import 'settings_screen.dart';
@@ -226,6 +227,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               state.toggleTheme();
               final prefs = await SharedPreferences.getInstance();
               await prefs.setBool('isDark', state.isDark);
+              await IconService.setIcon(isDark: state.isDark);
             },
           ),
           const SizedBox(width: 8),
