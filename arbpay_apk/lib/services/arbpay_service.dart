@@ -18,6 +18,11 @@ class ArbPayService {
   int _bankIndex = 0;
   final Set<String> _skippedOrders = {};
   final Set<String> _seenBuyCodes = {};   // mirrors Python _seen_codes
+  // Banks actually enabled/bound on the site for this account. Populated by
+  // _fetchAvailableBanks(); falls back to the full hardcoded list.
+  List<String> _activeBanks = List<String>.from(_bankCodes);
+  // Consecutive orders that were rejected (2005) by EVERY active bank.
+  int _ordersAllBanksRejected = 0;
 
   void init(InAppWebViewController controller, AppState state) {
     _webView = controller;
@@ -50,6 +55,7 @@ class ArbPayService {
       _log('Token captured! Starting buy loop...', level: LogLevel.success);
       _state?.setStatus(BotStatus.running);
       _seenBuyCodes.clear();
+      await _fetchAvailableBanks();
       await _runBuyLoop(amtMin, amtMax);
     } catch (e) {
       _log('Fatal error: $e', level: LogLevel.error);
@@ -176,6 +182,79 @@ class ArbPayService {
     }
   }
 
+  // ── Fetch banks actually enabled/bound on the site ──────────────────────
+  // If we blindly cycle the hardcoded list and none of those are enabled for
+  // this account, every buy returns 2005 forever. Querying the real list lets
+  // us cycle only usable banks and warn loudly when there are none.
+  Future<void> _fetchAvailableBanks() async {
+    final isBank = _state?.paymentMode == PaymentMode.bank;
+    final payType   = isBank ? '1' : '3';
+    final orderType = isBank ? 2 : 1;
+
+    final resp = await _post(
+      '/ar-wallet/kycCenter/getBanks/bankListAndBoundListForQuick',
+      {'payType': payType, 'orderType': orderType},
+      verbose: true,
+    );
+
+    if (resp.isEmpty) {
+      _log('Bank list fetch failed — using default bank cycle (${_bankCodes.join(", ")})',
+          level: LogLevel.warning);
+      _activeBanks = List<String>.from(_bankCodes);
+      return;
+    }
+
+    // The response shape isn't 100% known, so scan recursively for any
+    // bank-code-like field that isn't explicitly disabled.
+    final codes = <String>[];
+    void scan(dynamic node) {
+      if (node is Map) {
+        final code = (node['bankCode'] ?? node['code'] ?? node['payBankCode'] ??
+                node['channelCode'] ?? node['bankCardCode'] ?? '')
+            .toString()
+            .toLowerCase()
+            .trim();
+        final status = (node['status'] ?? node['enable'] ?? node['enabled'] ??
+                node['available'] ?? node['state'] ?? '')
+            .toString()
+            .toLowerCase();
+        final disabled = status == '0' || status == 'false' ||
+            status == 'disabled' || status == 'off' || status == 'no';
+        if (code.isNotEmpty && !disabled) codes.add(code);
+        for (final v in node.values) {
+          scan(v);
+        }
+      } else if (node is List) {
+        for (final v in node) {
+          scan(v);
+        }
+      }
+    }
+    scan(resp['data'] ?? resp['result'] ?? resp);
+
+    // Order: known codes first (we know how to send them), then any extras.
+    final seen = <String>{};
+    final ordered = <String>[];
+    for (final b in _bankCodes) {
+      if (codes.contains(b) && seen.add(b)) ordered.add(b);
+    }
+    for (final c in codes) {
+      if (seen.add(c)) ordered.add(c);
+    }
+
+    if (ordered.isEmpty) {
+      _log('⚠ Site returned NO enabled banks. Buys will all fail (2005). '
+          'Check your account\'s bound banks / payment mode in Settings.',
+          level: LogLevel.error);
+      // Fall back so we still attempt; the global detector will stop us if
+      // every bank really is rejected.
+      _activeBanks = List<String>.from(_bankCodes);
+    } else {
+      _activeBanks = ordered;
+      _log('Enabled banks: ${ordered.join(", ")}', level: LogLevel.success);
+    }
+  }
+
   // ── Buy loop ───────────────────────────────────────────────────────────────
   Future<void> _runBuyLoop(int amtMin, int amtMax) async {
     final isBank = _state?.paymentMode == PaymentMode.bank;
@@ -189,6 +268,7 @@ class ArbPayService {
         level: LogLevel.info);
     _skippedOrders.clear();
     _bankIndex = 0;
+    _ordersAllBanksRejected = 0;
     int emptyStreak   = 0;
     int fetchFailStreak = 0;
     int buyListCallCount = 0;
@@ -249,11 +329,11 @@ class ArbPayService {
         continue;
       }
 
-      _log('Attempt #$attempts → order=$platformOrder ₹$amount bank=${_bankCodes[_bankIndex % _bankCodes.length]}',
+      _log('Attempt #$attempts → order=$platformOrder ₹$amount bank=${_activeBanks[_bankIndex % _activeBanks.length]}',
           level: LogLevel.info);
 
       // ── buy ───────────────────────────────────────────────────────────────
-      final currentBank = _bankCodes[_bankIndex % _bankCodes.length];
+      final currentBank = _activeBanks[_bankIndex % _activeBanks.length];
       verboseBuyCount++;
       final buyResp = await _apiBuy(platformOrder, amount, currentBank,
           payType: payType, orderType: orderType,
@@ -283,6 +363,10 @@ class ArbPayService {
       final code = buyResp['code']?.toString() ?? '';
       final msg  = buyResp['msg']?.toString() ?? buyResp['message']?.toString() ?? '';
 
+      // Any response other than a bank rejection means at least one bank is
+      // being accepted/processed — reset the "all banks dead" detector.
+      if (code != '2005') _ordersAllBanksRejected = 0;
+
       // Log every unique code with its message
       if (!_seenBuyCodes.contains(code)) {
         _seenBuyCodes.add(code);
@@ -307,10 +391,20 @@ class ArbPayService {
       } else if (code == '2005') {
         _log('Bank "$currentBank" rejected (2005) for $platformOrder — next bank');
         _bankIndex++;
-        if (_bankIndex % _bankCodes.length == 0) {
+        if (_bankIndex % _activeBanks.length == 0) {
           _log('All banks rejected for $platformOrder — skipping', level: LogLevel.warning);
           _skippedOrders.add(platformOrder);
           _bankIndex = 0;
+          _ordersAllBanksRejected++;
+          if (_ordersAllBanksRejected >= 15) {
+            _log('STOP: $_ordersAllBanksRejected orders in a row rejected by EVERY bank '
+                '(${_activeBanks.join(", ")}). None of your payment banks appear to be '
+                'enabled on the site. Fix your bound banks / switch payment mode in '
+                'Settings, then start again.', level: LogLevel.error);
+            _state?.setStatus(BotStatus.error);
+            _running = false;
+            return;
+          }
         }
         await Future.delayed(const Duration(milliseconds: 50));
         continue;
