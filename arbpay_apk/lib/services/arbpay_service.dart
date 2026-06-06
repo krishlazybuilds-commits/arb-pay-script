@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:http/http.dart' as http;
 import '../models/app_state.dart';
 
 class ArbPayService {
@@ -24,6 +25,20 @@ class ArbPayService {
   // Consecutive orders that were rejected (2005) by EVERY active bank.
   int _ordersAllBanksRejected = 0;
 
+  // ── Native HTTP fast-path ────────────────────────────────────────────────
+  // We send API calls with a native keep-alive HTTP client (no WebView/JS
+  // bridge) using the token + cookies + User-Agent harvested from the WebView
+  // session. If Cloudflare blocks the native client (403 / challenge), we fall
+  // back to the WebView fetch() path automatically.
+  http.Client? _httpClient;
+  String _userAgent = '';
+  String _cookieHeader = '';
+  bool _nativeEnabled = true;     // disabled after repeated CF blocks
+  int _nativeBlockStreak = 0;     // consecutive native CF blocks
+  // How many buy requests to fire in parallel when an order is found (native
+  // path only). First success wins. Kept modest to avoid rate-limit (1191).
+  static const int _buyConcurrency = 3;
+
   void init(InAppWebViewController controller, AppState state) {
     _webView = controller;
     _state = state;
@@ -31,6 +46,8 @@ class ArbPayService {
 
   void dispose() {
     stop();
+    try { _httpClient?.close(); } catch (_) {}
+    _httpClient = null;
     _webView = null;
     _state = null;
   }
@@ -55,6 +72,7 @@ class ArbPayService {
       _log('Token captured! Starting buy loop...', level: LogLevel.success);
       _state?.setStatus(BotStatus.running);
       _seenBuyCodes.clear();
+      await _harvestSession();
       await _fetchAvailableBanks();
       await _runBuyLoop(amtMin, amtMax);
     } catch (e) {
@@ -180,6 +198,12 @@ class ArbPayService {
     } else {
       _log('Token not found — make sure you are logged in', level: LogLevel.error);
     }
+
+    // If the native fast-path is already armed, refresh cookies so a rebuilt
+    // session keeps using a valid cf_clearance.
+    if (_httpClient != null) {
+      await _refreshCookies();
+    }
   }
 
   // ── Fetch banks actually enabled/bound on the site ──────────────────────
@@ -191,7 +215,7 @@ class ArbPayService {
     final payType   = isBank ? '1' : '3';
     final orderType = isBank ? 2 : 1;
 
-    final resp = await _post(
+    final resp = await _request(
       '/ar-wallet/kycCenter/getBanks/bankListAndBoundListForQuick',
       {'payType': payType, 'orderType': orderType},
       verbose: true,
@@ -335,7 +359,7 @@ class ArbPayService {
       // ── buy ───────────────────────────────────────────────────────────────
       final currentBank = _activeBanks[_bankIndex % _activeBanks.length];
       verboseBuyCount++;
-      final buyResp = await _apiBuy(platformOrder, amount, currentBank,
+      final buyResp = await _apiBuyRace(platformOrder, amount, currentBank,
           payType: payType, orderType: orderType,
           verbose: verboseBuyCount <= 5);
 
@@ -439,6 +463,157 @@ class ArbPayService {
     _log('QR payment screen ready!', level: LogLevel.success);
   }
 
+  // ── Harvest token/cookies/UA for the native HTTP fast-path ───────────────
+  Future<void> _harvestSession() async {
+    if (_webView == null) return;
+    try {
+      // Exact UA the WebView uses, so Cloudflare sees a consistent client.
+      final ua = await _webView!.evaluateJavascript(source: 'navigator.userAgent');
+      _userAgent = (ua?.toString() ?? '').trim();
+      if (_userAgent.isEmpty) {
+        _userAgent = 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+      }
+
+      // Collect cookies for both the site host and the API host.
+      final cm = CookieManager.instance();
+      final byName = <String, String>{};
+      for (final host in ['https://apiweb.arbpay.me', 'https://arbpay.me']) {
+        try {
+          final cookies = await cm.getCookies(url: WebUri(host));
+          for (final c in cookies) {
+            if (c.name.isNotEmpty) byName[c.name] = c.value.toString();
+          }
+        } catch (_) {}
+      }
+      _cookieHeader = byName.entries.map((e) => '${e.key}=${e.value}').join('; ');
+
+      _httpClient ??= http.Client();
+      _nativeEnabled = true;
+      _nativeBlockStreak = 0;
+      final cfPresent = byName.keys.any((k) => k.toLowerCase().contains('cf_clearance'));
+      _log('Native fast-path armed (cookies: ${byName.length}${cfPresent ? ", cf_clearance ✓" : ""})',
+          level: LogLevel.success);
+    } catch (e) {
+      _log('Native session harvest failed: $e — staying on WebView path',
+          level: LogLevel.warning);
+      _nativeEnabled = false;
+    }
+  }
+
+  bool _looksLikeCfChallenge(int status, String body) {
+    if (status == 403 || status == 503 || status == 429) return true;
+    final b = body.toLowerCase();
+    return b.contains('just a moment') ||
+        b.contains('challenge-platform') ||
+        b.contains('cf-chl') ||
+        b.contains('_cf_chl') ||
+        b.contains('attention required') ||
+        (b.contains('cloudflare') && b.contains('<html'));
+  }
+
+  // ── Native HTTP POST. Returns:                                            ──
+  //   • a parsed Map (possibly empty) when the native client handled it      ──
+  //   • null when blocked/unusable → caller should fall back to WebView      ──
+  Future<Map<String, dynamic>?> _postNative(String path, Map<String, dynamic> body,
+      {String page = 'Arb', bool verbose = false}) async {
+    if (!_nativeEnabled || _httpClient == null || _token.isEmpty) return null;
+
+    final headers = <String, String>{
+      'Accept': 'application/json, text/plain, */*',
+      'Content-Type': 'application/json',
+      'authorization': 'Bearer $_token',
+      'deviceCode': _deviceCode,
+      'deviceId': '',
+      'deviceType': '3',
+      'language': '1',
+      'page': page,
+      'Origin': 'https://arbpay.me',
+      'Referer': 'https://arbpay.me/',
+      if (_userAgent.isNotEmpty) 'User-Agent': _userAgent,
+      if (_cookieHeader.isNotEmpty) 'Cookie': _cookieHeader,
+    };
+
+    try {
+      final resp = await _httpClient!
+          .post(Uri.parse('$_apiUrl$path'), headers: headers, body: jsonEncode(body))
+          .timeout(const Duration(seconds: 8));
+
+      final status = resp.statusCode;
+      final text = resp.body;
+
+      if (_looksLikeCfChallenge(status, text)) {
+        _nativeBlockStreak++;
+        _log('Native POST $path blocked by Cloudflare (HTTP $status) — falling back to WebView',
+            level: LogLevel.warning);
+        // Re-harvest cookies once in case clearance rotated.
+        if (_nativeBlockStreak == 1) {
+          await _refreshCookies();
+        }
+        if (_nativeBlockStreak >= 3) {
+          _nativeEnabled = false;
+          _log('Native path disabled after $_nativeBlockStreak CF blocks — using WebView only',
+              level: LogLevel.warning);
+        }
+        return null; // fall back
+      }
+
+      _nativeBlockStreak = 0; // healthy response resets the block streak
+
+      if (status != 200 && status != 201) {
+        final preview = text.length > 300 ? text.substring(0, 300) : text;
+        _log('Native POST $path → HTTP $status body: $preview', level: LogLevel.error);
+        return {}; // handled (real server error, not a CF block)
+      }
+      if (text.isEmpty) return {};
+
+      if (verbose) {
+        final preview = text.length > 400 ? text.substring(0, 400) : text;
+        _log('Native POST $path → $status: $preview', level: LogLevel.info);
+      }
+
+      try {
+        return Map<String, dynamic>.from(jsonDecode(text));
+      } catch (_) {
+        // HTML/non-JSON where JSON was expected ⇒ likely a challenge.
+        if (_looksLikeCfChallenge(200, text)) return null;
+        return {};
+      }
+    } catch (e) {
+      // Network/timeout/socket error — don't kill native permanently, just
+      // fall back for this call.
+      _log('Native POST $path → error: $e — falling back to WebView',
+          level: LogLevel.warning);
+      return null;
+    }
+  }
+
+  Future<void> _refreshCookies() async {
+    try {
+      final cm = CookieManager.instance();
+      final byName = <String, String>{};
+      for (final host in ['https://apiweb.arbpay.me', 'https://arbpay.me']) {
+        try {
+          final cookies = await cm.getCookies(url: WebUri(host));
+          for (final c in cookies) {
+            if (c.name.isNotEmpty) byName[c.name] = c.value.toString();
+          }
+        } catch (_) {}
+      }
+      if (byName.isNotEmpty) {
+        _cookieHeader = byName.entries.map((e) => '${e.key}=${e.value}').join('; ');
+      }
+    } catch (_) {}
+  }
+
+  // ── Unified request: native fast-path first, WebView fallback ────────────
+  Future<Map<String, dynamic>> _request(String path, Map<String, dynamic> body,
+      {String page = 'Arb', bool verbose = false}) async {
+    final native = await _postNative(path, body, page: page, verbose: verbose);
+    if (native != null) return native;
+    return _post(path, body, page: page, verbose: verbose);
+  }
+
   // ── WebView fetch() — full verbose logging ───────────────────────────────
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body,
       {String page = 'Arb', bool verbose = false}) async {
@@ -538,7 +713,7 @@ class ArbPayService {
   // ── Order list ─────────────────────────────────────────────────────────────
   Future<List<Map<String, dynamic>>> _getOrderList(int amtMin, int amtMax,
       {int orderType = 1, bool verbose = false}) async {
-    final data = await _post(
+    final data = await _request(
       '/ar-wallet/buyCenter/buyList',
       {'orderType': orderType, 'pageNo': 1},
       verbose: verbose,
@@ -600,7 +775,7 @@ class ArbPayService {
   Future<Map<String, dynamic>> _apiBuy(
       String platformOrder, int amount, String bankCode,
       {String payType = '3', int orderType = 1, bool verbose = false}) async {
-    final resp = await _post(
+    final resp = await _request(
       '/ar-wallet/buyCenter/buy',
       {
         'amount': amount,
@@ -613,6 +788,38 @@ class ArbPayService {
       verbose: verbose,
     );
     return resp;
+  }
+
+  // Fire several buy requests at once (native path) so the earliest one to
+  // reach the server claims the order. First success wins; otherwise return
+  // the first meaningful (non-empty) response. Falls back to a single request
+  // when the native path is disabled (the WebView controller can't safely run
+  // concurrent fetches).
+  static const _successCodes = {'200', '0', '1', '00', 'success', 'SUCCESS'};
+
+  Future<Map<String, dynamic>> _apiBuyRace(
+      String platformOrder, int amount, String bankCode,
+      {required String payType, required int orderType, bool verbose = false}) async {
+    final n = (_nativeEnabled && _httpClient != null) ? _buyConcurrency : 1;
+    if (n == 1) {
+      return _apiBuy(platformOrder, amount, bankCode,
+          payType: payType, orderType: orderType, verbose: verbose);
+    }
+
+    final futures = <Future<Map<String, dynamic>>>[
+      for (int i = 0; i < n; i++)
+        _apiBuy(platformOrder, amount, bankCode,
+            payType: payType, orderType: orderType, verbose: verbose && i == 0),
+    ];
+    final results = await Future.wait(futures);
+
+    for (final r in results) {
+      if (_successCodes.contains(r['code']?.toString() ?? '')) return r;
+    }
+    for (final r in results) {
+      if (r.isNotEmpty) return r;
+    }
+    return {};
   }
 
   String _extractMrOrder(Map<String, dynamic> resp) {
