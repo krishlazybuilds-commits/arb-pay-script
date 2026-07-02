@@ -475,17 +475,40 @@ class ArbPayService {
             '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
       }
 
-      // Collect cookies for both the site host and the API host.
+      // Poke the API host through the WebView so Cloudflare sets cf_clearance
+      // on apiweb.arbpay.me.  The browser handles the JS challenge natively.
+      // Retry up to 3 times with increasing delays.
       final cm = CookieManager.instance();
-      final byName = <String, String>{};
-      for (final host in ['https://apiweb.arbpay.me', 'https://arbpay.me']) {
-        try {
-          final cookies = await cm.getCookies(url: WebUri(host));
-          for (final c in cookies) {
-            if (c.name.isNotEmpty) byName[c.name] = c.value.toString();
-          }
-        } catch (_) {}
+      var byName = <String, String>{};
+
+      for (int attempt = 0; attempt < 3; attempt++) {
+        // Collect existing cookies first.
+        byName = {};
+        for (final host in ['https://apiweb.arbpay.me', 'https://arbpay.me']) {
+          try {
+            final cookies = await cm.getCookies(url: WebUri(host));
+            for (final c in cookies) {
+              if (c.name.isNotEmpty) byName[c.name] = c.value.toString();
+            }
+          } catch (_) {}
+        }
+        if (byName.containsKey('cf_clearance')) break; // already have it
+
+        _log('Warming API host for cf_clearance (attempt ${attempt + 1})...', level: LogLevel.info);
+        await _webView!.callAsyncJavaScript(functionBody: '''
+          try {
+            await fetch("https://apiweb.arbpay.me", {
+              method: "GET",
+              mode: "no-cors",
+              credentials: "include"
+            });
+          } catch (_) {}
+          return true;
+        ''');
+        // Wait for the challenge to resolve — first attempt 3 s, then 5 s, then 8 s.
+        await Future.delayed(Duration(seconds: 3 + attempt * 2));
       }
+
       _cookieHeader = byName.entries.map((e) => '${e.key}=${e.value}').join('; ');
 
       _httpClient ??= http.Client();
@@ -494,6 +517,10 @@ class ArbPayService {
       final cfPresent = byName.keys.any((k) => k.toLowerCase().contains('cf_clearance'));
       _log('Native fast-path armed (cookies: ${byName.length}${cfPresent ? ", cf_clearance ✓" : ""})',
           level: LogLevel.success);
+      if (!cfPresent) {
+        _log('WARNING: cf_clearance missing — native requests will likely be blocked',
+            level: LogLevel.warning);
+      }
     } catch (e) {
       _log('Native session harvest failed: $e — staying on WebView path',
           level: LogLevel.warning);
@@ -591,7 +618,7 @@ class ArbPayService {
   Future<void> _refreshCookies() async {
     try {
       final cm = CookieManager.instance();
-      final byName = <String, String>{};
+      var byName = <String, String>{};
       for (final host in ['https://apiweb.arbpay.me', 'https://arbpay.me']) {
         try {
           final cookies = await cm.getCookies(url: WebUri(host));
@@ -599,6 +626,28 @@ class ArbPayService {
             if (c.name.isNotEmpty) byName[c.name] = c.value.toString();
           }
         } catch (_) {}
+      }
+      // If cf_clearance is still missing, re-warm the API host.
+      if (!byName.containsKey('cf_clearance') && _webView != null) {
+        _log('Re-warming API host for cf_clearance...', level: LogLevel.info);
+        await _webView!.callAsyncJavaScript(functionBody: '''
+          try {
+            await fetch("https://apiweb.arbpay.me", {
+              method: "GET", mode: "no-cors", credentials: "include"
+            });
+          } catch (_) {}
+          return true;
+        ''');
+        await Future.delayed(const Duration(seconds: 3));
+        byName = {};
+        for (final host in ['https://apiweb.arbpay.me', 'https://arbpay.me']) {
+          try {
+            final cookies = await cm.getCookies(url: WebUri(host));
+            for (final c in cookies) {
+              if (c.name.isNotEmpty) byName[c.name] = c.value.toString();
+            }
+          } catch (_) {}
+        }
       }
       if (byName.isNotEmpty) {
         _cookieHeader = byName.entries.map((e) => '${e.key}=${e.value}').join('; ');
