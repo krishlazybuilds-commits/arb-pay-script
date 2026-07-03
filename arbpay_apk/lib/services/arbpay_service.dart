@@ -261,7 +261,10 @@ class ArbPayService {
     }
     // Walk data.allBanks (supported payment banks for buying). Also
     // check data.boundBanks as a fallback in case the shape differs.
-    scan(resp['data']?.['allBanks'] ?? resp['data']?.['boundBanks'] ?? resp['data']);
+    final dataNode = resp['data'];
+    if (dataNode is Map) {
+      scan(dataNode['allBanks'] ?? dataNode['boundBanks'] ?? dataNode);
+    }
 
     // Order: known codes first (we know how to send them), then any extras.
     final seen = <String>{};
