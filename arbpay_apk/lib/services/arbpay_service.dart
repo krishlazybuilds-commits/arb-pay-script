@@ -206,18 +206,14 @@ class ArbPayService {
     }
   }
 
-  // ── Fetch banks actually enabled/bound on the site ──────────────────────
-  // If we blindly cycle the hardcoded list and none of those are enabled for
-  // this account, every buy returns 2005 forever. Querying the real list lets
-  // us cycle only usable banks and warn loudly when there are none.
+  // ── Fetch banks actually available on the site for buying ───────────────
+  // The endpoint takes {'type': '1'} for buying and returns data.allBanks
+  // (supported payment banks). Falls back to the hardcoded list that the
+  // Python script uses, so this is a safe default on any failure.
   Future<void> _fetchAvailableBanks() async {
-    final isBank = _state?.paymentMode == PaymentMode.bank;
-    final payType   = isBank ? '1' : '3';
-    final orderType = isBank ? 2 : 1;
-
     final resp = await _request(
       '/ar-wallet/kycCenter/getBanks/bankListAndBoundListForQuick',
-      {'payType': payType, 'orderType': orderType},
+      {'type': '1'},
       verbose: true,
     );
 
@@ -228,12 +224,21 @@ class ArbPayService {
       return;
     }
 
+    final respCode = resp['code']?.toString() ?? '';
+    final respMsg  = resp['msg']?.toString() ?? resp['message']?.toString() ?? '';
+    if (respCode != '1' && respCode != '200' && respCode != '0') {
+      _log('Bank list API error (code=$respCode): $respMsg — using default bank cycle',
+          level: LogLevel.warning);
+      _activeBanks = List<String>.from(_bankCodes);
+      return;
+    }
+
     // The response shape isn't 100% known, so scan recursively for any
     // bank-code-like field that isn't explicitly disabled.
     final codes = <String>[];
     void scan(dynamic node) {
       if (node is Map) {
-        final code = (node['bankCode'] ?? node['code'] ?? node['payBankCode'] ??
+        final code = (node['bankCode'] ?? node['payBankCode'] ??
                 node['channelCode'] ?? node['bankCardCode'] ?? '')
             .toString()
             .toLowerCase()
@@ -254,7 +259,9 @@ class ArbPayService {
         }
       }
     }
-    scan(resp['data'] ?? resp['result'] ?? resp);
+    // Walk data.allBanks (supported payment banks for buying). Also
+    // check data.boundBanks as a fallback in case the shape differs.
+    scan(resp['data']?.['allBanks'] ?? resp['data']?.['boundBanks'] ?? resp['data']);
 
     // Order: known codes first (we know how to send them), then any extras.
     final seen = <String>{};
@@ -267,11 +274,8 @@ class ArbPayService {
     }
 
     if (ordered.isEmpty) {
-      _log('⚠ Site returned NO enabled banks. Buys will all fail (2005). '
-          'Check your account\'s bound banks / payment mode in Settings.',
-          level: LogLevel.error);
-      // Fall back so we still attempt; the global detector will stop us if
-      // every bank really is rejected.
+      _log('Bank list parsed but NO usable bankCodes found. Using default: ${_bankCodes.join(", ")}',
+          level: LogLevel.warning);
       _activeBanks = List<String>.from(_bankCodes);
     } else {
       _activeBanks = ordered;
@@ -283,7 +287,7 @@ class ArbPayService {
   Future<void> _runBuyLoop(int amtMin, int amtMax) async {
     final isBank = _state?.paymentMode == PaymentMode.bank;
     final orderType = isBank ? 2 : 1;
-    final payType   = isBank ? '2' : '3';
+    final payType   = isBank ? '1' : '3';
     final modeLabel = isBank ? 'Bank' : 'OTP/UPI';
     _log('Buy loop started (₹$amtMin - ₹$amtMax) [Mode: $modeLabel]', level: LogLevel.success);
     _log('Token last 12: ...${_token.length > 12 ? _token.substring(_token.length - 12) : _token}',
@@ -323,6 +327,10 @@ class ArbPayService {
         if (emptyStreak >= 100) {
           _log('[WARN] 100 empty buyLists — rebuilding session', level: LogLevel.warning);
           await _buildApiSession();
+          await _harvestSession();
+          _skippedOrders.clear();
+          _bankIndex = 0;
+          _ordersAllBanksRejected = 0;
           emptyStreak = 0;
         }
         await Future.delayed(const Duration(milliseconds: 50));
@@ -377,6 +385,10 @@ class ArbPayService {
           _log('[WARN] $fetchFailStreak consecutive empty — rebuilding session',
               level: LogLevel.warning);
           await _buildApiSession();
+          await _harvestSession();
+          _skippedOrders.clear();
+          _bankIndex = 0;
+          _ordersAllBanksRejected = 0;
           fetchFailStreak = 0;
         }
         await Future.delayed(const Duration(milliseconds: 100));
