@@ -19,7 +19,7 @@ Future<void> _clearWebViewSession() async {
   try { await WebStorageManager.instance().deleteAllData(); } catch (_) {}
 }
 
-const kBuildVersion = 'v1.2.3';
+const kBuildVersion = 'v1.2.4';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -55,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   static const _maxDomainTries = 4;
   Timer? _loadTimer;
   int _domainTries = 0;
+  Timer? _tokenPoll;
 
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
@@ -72,6 +73,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _tokenPoll?.cancel();
     _loadTimer?.cancel();
     _service.dispose();
     _pulseCtrl.dispose();
@@ -97,6 +99,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _domainTries = 0;
     });
     _startTimer();
+    _startTokenPoll();
   }
 
   void _retryPage() {
@@ -158,6 +161,32 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _startTimer();
   }
 
+  // A logged-in SPA can swap the DOM without firing onLoadStop /
+  // onUpdateVisitedHistory, so navigation events alone miss the token.
+  // Poll localStorage as a backstop so "Run Bot" appears once logged in.
+  void _startTokenPoll() {
+    _tokenPoll?.cancel();
+    _tokenPoll = Timer.periodic(const Duration(seconds: 2), (t) async {
+      final c = _webController;
+      if (!mounted || !_showWebView || _loginReady || _isRunning || c == null) {
+        return;
+      }
+      if (await _hasToken(c)) {
+        t.cancel();
+        _tokenPoll = null;
+        if (!mounted) return;
+        setState(() => _loginReady = true);
+        context.read<AppState>().addLog('Login token detected via poll',
+            level: LogLevel.success);
+      }
+    });
+  }
+
+  void _stopTokenPoll() {
+    _tokenPoll?.cancel();
+    _tokenPoll = null;
+  }
+
   Future<void> _editProfile(Profile profile) async {
     final state = context.read<AppState>();
     await Navigator.push(
@@ -179,11 +208,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (_webController != null) _service.init(_webController!, state);
     await _service.captureTokenAndRun(
         state.phone, state.password, state.amountMin, state.amountMax);
+    _stopTokenPoll();
     setState(() { _isRunning = false; _showWebView = false; _loginReady = false; });
   }
 
   void _stopBot() {
     _service.stop();
+    _stopTokenPoll();
     setState(() { _isRunning = false; _showWebView = false; _loginReady = false; });
   }
 
@@ -192,6 +223,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     state.reset();
     state.clearLogs();
     _service.stop();
+    _stopTokenPoll();
     setState(() {
       _isRunning = false;
       _showWebView = false;
@@ -201,7 +233,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     });
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
+  // ─── Build ──────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Consumer<AppState>(
@@ -561,7 +593,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         color: t.bg,
         child: Row(children: [
           _headerBtn(icon: Icons.arrow_back_ios_new_rounded, color: t.textSub, t: t,
-            onTap: () => setState(() { _showWebView = false; _loginReady = false; })),
+            onTap: () {
+              _stopTokenPoll();
+              setState(() { _showWebView = false; _loginReady = false; });
+            }),
           const SizedBox(width: 12),
           Expanded(child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
