@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- The site and API rotate across many domains, so cleartext is permitted
+     app-wide (matching android:usesCleartextTraffic="true"). */
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">arbpay.me</domain>
-        <domain includeSubdomains="true">apiweb.arbpay.me</domain>
-    </domain-config>
-    <base-config cleartextTrafficPermitted="false"/>
+    <base-config cleartextTrafficPermitted="true"/>
 </network-security-config>

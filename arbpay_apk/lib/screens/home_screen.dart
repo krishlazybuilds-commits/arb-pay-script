@@ -18,7 +18,7 @@ Future<void> _clearWebViewSession() async {
   try { await WebStorageManager.instance().deleteAllData(); } catch (_) {}
 }
 
-const kBuildVersion = 'v1.2.0';
+const kBuildVersion = 'v1.2.1';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -34,6 +34,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _loginReady  = false;
   bool _isRunning   = false;
   int  _webViewKey  = 0;
+  bool _pageLoading = false;
+  String _loadError = '';
+  int  _entryIndex  = 0;
+
+  // Entry domains. arbpay.me is flaky (and the site itself lists *.top/.vip/.ai
+  // as its official domains), so we let the user fall back to another one.
+  static const List<String> _entryUrls = [
+    'https://arbpay.me',
+    'https://arbpay.top',
+    'https://arbpay.vip',
+    'https://arbpay.ai',
+  ];
 
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
@@ -70,6 +82,27 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _webController = null;
       _showWebView = true;
       _loginReady = false;
+      _loadError = '';
+      _pageLoading = true;
+    });
+  }
+
+  void _retryPage() {
+    setState(() {
+      _loadError = '';
+      _pageLoading = true;
+      _webViewKey++;
+      _webController = null;
+    });
+  }
+
+  void _nextDomain() {
+    setState(() {
+      _entryIndex = (_entryIndex + 1) % _entryUrls.length;
+      _loadError = '';
+      _pageLoading = true;
+      _webViewKey++;
+      _webController = null;
     });
   }
 
@@ -469,6 +502,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ── WebView ────────────────────────────────────────────────────────────────
   Widget _buildWebView(AppState state, AppTheme t) {
     final p = state.activeProfile;
+    final domain = _entryUrls[_entryIndex];
     return Column(children: [
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -509,28 +543,86 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         color: t.surface,
         child: Row(children: [
-          Icon(Icons.info_outline_rounded, color: t.yellow, size: 15),
+          Icon(_loadError.isEmpty ? Icons.info_outline_rounded : Icons.wifi_off_rounded,
+            color: _loadError.isEmpty ? t.yellow : t.red, size: 15),
           const SizedBox(width: 8),
-          Expanded(child: Text('Log in below, then tap "Run Bot" once you are on the home page.',
-            style: TextStyle(color: t.textSub, fontSize: 12))),
+          Expanded(child: Text(
+            _loadError.isEmpty
+                ? 'Log in below, then tap "Run Bot" once you are on the home page.'
+                : 'Could not reach $domain. Try again or pick another domain below.',
+            style: TextStyle(
+              color: _loadError.isEmpty ? t.textSub : t.red, fontSize: 12))),
         ]),
       ),
-      Expanded(child: InAppWebView(
-        key: ValueKey(_webViewKey),
-        initialUrlRequest: URLRequest(url: WebUri('https://arbpay.me')),
-        initialSettings: InAppWebViewSettings(
-          javaScriptEnabled: true, domStorageEnabled: true, databaseEnabled: true,
-          userAgent: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
-              '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+      Expanded(child: Stack(children: [
+        InAppWebView(
+          key: ValueKey(_webViewKey),
+          initialUrlRequest: URLRequest(url: WebUri(domain)),
+          initialSettings: InAppWebViewSettings(
+            javaScriptEnabled: true, domStorageEnabled: true, databaseEnabled: true,
+            userAgent: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+          ),
+          onWebViewCreated: (c) { _webController = c; _service.init(c, state); },
+          onLoadStart: (c, url) {
+            if (mounted) setState(() => _pageLoading = true);
+          },
+          onLoadStop: (c, url) async {
+            _webController = c;
+            if (mounted) {
+              setState(() { _pageLoading = false; _loadError = ''; });
+            }
+            await _handleUrlChange(c, url?.toString() ?? '');
+          },
+          onReceivedError: (c, request, error) {
+            if (!mounted) return;
+            if (request.isForMainFrame != true) return;
+            setState(() { _pageLoading = false; _loadError = error.description; });
+            state.addLog('Page load failed: ${error.description} (${error.type})',
+                level: LogLevel.error);
+          },
+          onUpdateVisitedHistory: (c, url, _) async =>
+              _handleUrlChange(c, url?.toString() ?? ''),
         ),
-        onWebViewCreated: (c) { _webController = c; _service.init(c, state); },
-        onLoadStop: (c, url) async {
-          _webController = c;
-          await _handleUrlChange(c, url?.toString() ?? '');
-        },
-        onUpdateVisitedHistory: (c, url, _) async =>
-            _handleUrlChange(c, url?.toString() ?? ''),
-      )),
+        // Loading overlay — replaces the blank/black WebView while it connects.
+        if (_pageLoading && _loadError.isEmpty)
+          Positioned.fill(child: Container(
+            color: t.bg.withValues(alpha: 0.9),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              SizedBox(width: 30, height: 30,
+                child: CircularProgressIndicator(strokeWidth: 2.5, color: t.yellow)),
+              const SizedBox(height: 16),
+              Text('Connecting to ARBPay',
+                style: TextStyle(color: t.textPrimary, fontSize: 14, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              Text(domain, style: TextStyle(color: t.textSub, fontSize: 11)),
+            ]),
+          )),
+        // Error state — explicit recovery instead of a silent black screen.
+        if (_loadError.isNotEmpty)
+          Positioned.fill(child: Container(
+            color: t.bg,
+            padding: const EdgeInsets.all(28),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(Icons.wifi_off_rounded, color: t.red, size: 46),
+              const SizedBox(height: 16),
+              Text("Couldn't reach ARBPay",
+                style: TextStyle(color: t.textPrimary, fontSize: 17, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(_loadError, textAlign: TextAlign.center,
+                style: TextStyle(color: t.textSub, fontSize: 12.5, height: 1.4)),
+              const SizedBox(height: 6),
+              Text(domain, style: TextStyle(
+                color: t.textDim, fontSize: 11, fontFamily: 'monospace')),
+              const SizedBox(height: 22),
+              _PrimaryBtn(label: 'TRY AGAIN', icon: Icons.refresh_rounded,
+                t: t, onTap: _retryPage),
+              const SizedBox(height: 10),
+              _OutlineBtn(label: 'TRY ANOTHER DOMAIN', icon: Icons.swap_horiz_rounded,
+                color: t.yellow, t: t, onTap: _nextDomain),
+            ]),
+          )),
+      ])),
       Container(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
         decoration: BoxDecoration(
