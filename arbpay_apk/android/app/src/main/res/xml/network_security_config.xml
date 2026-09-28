@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The site and API rotate across many domains, so cleartext is permitted
-     app-wide (matching android:usesCleartextTraffic="true"). */
 <network-security-config>
+    <!-- The site and API rotate across many domains, so cleartext is
+         permitted app-wide (matching usesCleartextTraffic). -->
     <base-config cleartextTrafficPermitted="true"/>
 </network-security-config>
