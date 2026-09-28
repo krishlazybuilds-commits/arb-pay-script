@@ -19,7 +19,7 @@ Future<void> _clearWebViewSession() async {
   try { await WebStorageManager.instance().deleteAllData(); } catch (_) {}
 }
 
-const kBuildVersion = 'v1.2.4';
+const kBuildVersion = 'v1.2.5';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -111,6 +111,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _domainTries = 0;
     });
     _startTimer();
+    _startTokenPoll();
   }
 
   void _nextDomain() {
@@ -123,6 +124,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _domainTries = 0;
     });
     _startTimer();
+    _startTokenPoll();
   }
 
   void _startTimer() {
@@ -159,6 +161,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _webController = null;
     });
     _startTimer();
+    _startTokenPoll();
   }
 
   // A logged-in SPA can swap the DOM without firing onLoadStop /
@@ -166,7 +169,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // Poll localStorage as a backstop so "Run Bot" appears once logged in.
   void _startTokenPoll() {
     _tokenPoll?.cancel();
-    _tokenPoll = Timer.periodic(const Duration(seconds: 2), (t) async {
+    _tokenPoll = Timer.periodic(const Duration(milliseconds: 1500), (t) async {
       final c = _webController;
       if (!mounted || !_showWebView || _loginReady || _isRunning || c == null) {
         return;
@@ -176,7 +179,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _tokenPoll = null;
         if (!mounted) return;
         setState(() => _loginReady = true);
-        context.read<AppState>().addLog('Login token detected via poll',
+        context.read<AppState>().addLog('Login detected — ready to run bot!',
             level: LogLevel.success);
       }
     });
@@ -209,7 +212,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await _service.captureTokenAndRun(
         state.phone, state.password, state.amountMin, state.amountMax);
     _stopTokenPoll();
-    setState(() { _isRunning = false; _showWebView = false; _loginReady = false; });
+    if (mounted) {
+      setState(() {
+        _isRunning = false;
+        if (state.status != BotStatus.error) {
+          _showWebView = false;
+        }
+        _loginReady = false;
+      });
+      if (state.status == BotStatus.error && _showWebView) {
+        _startTokenPoll();
+      }
+    }
   }
 
   void _stopBot() {
@@ -650,7 +664,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             userAgent: 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
                 '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
           ),
-          onWebViewCreated: (c) { _webController = c; _service.init(c, state); },
+          onWebViewCreated: (c) {
+            _webController = c;
+            _service.init(c, state);
+            _startTokenPoll();
+          },
           onLoadStart: (c, url) {
             _startTimer();
             if (mounted) setState(() => _pageLoading = true);
@@ -662,6 +680,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               setState(() { _pageLoading = false; _loadError = ''; });
             }
             await _handleUrlChange(c, url?.toString() ?? '');
+            if (!_loginReady && !_isRunning) _startTokenPoll();
           },
           onReceivedError: (c, request, error) {
             if (request.isForMainFrame != true) return;
@@ -725,20 +744,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: _loginReady && !_isRunning
               ? _PrimaryBtn(key: const ValueKey('run'), label: 'RUN BOT',
                   icon: Icons.bolt_rounded, t: t, onTap: _completeCaptureAndRun)
-              : Container(
+              : GestureDetector(
                   key: const ValueKey('wait'),
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: t.card, borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: t.border),
+                  onTap: _isRunning ? null : _completeCaptureAndRun,
+                  child: Container(
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: t.card, borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: t.border),
+                    ),
+                    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      SizedBox(width: 14, height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: t.textSub)),
+                      const SizedBox(width: 10),
+                      Text(_isRunning ? 'Running...' : 'Waiting for login... (tap to run)',
+                        style: TextStyle(color: t.textSub, fontSize: 14)),
+                    ]),
                   ),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    SizedBox(width: 14, height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: t.textSub)),
-                    const SizedBox(width: 10),
-                    Text(_isRunning ? 'Running...' : 'Waiting for login...',
-                      style: TextStyle(color: t.textSub, fontSize: 14)),
-                  ]),
                 ),
         ),
       ),
@@ -758,21 +780,119 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _handleUrlChange(InAppWebViewController c, String url) async {
     _webController = c;
     if (await _hasToken(c)) {
-      if (mounted && !_loginReady) setState(() => _loginReady = true);
+      if (mounted && !_loginReady) {
+        setState(() => _loginReady = true);
+        _stopTokenPoll();
+        context.read<AppState>().addLog('Login detected — ready to run bot!',
+            level: LogLevel.success);
+      }
       return;
     }
     if (url.contains('login')) {
       await _autoFill(c);
-      if (mounted && _loginReady) setState(() => _loginReady = false);
+      if (mounted && _loginReady) {
+        setState(() => _loginReady = false);
+        _startTokenPoll();
+      }
     }
   }
 
   Future<bool> _hasToken(InAppWebViewController c) async {
     try {
-      final r = await c.evaluateJavascript(
-          source: "try{return localStorage.getItem('token')||''}catch(e){return ''}");
+      final res = await c.callAsyncJavaScript(functionBody: '''
+        function checkVal(v) {
+          if (!v || v === 'null' || v === '{}' || v === 'undefined') return false;
+          if (typeof v === 'string') {
+            if (v.startsWith('{')) {
+              try {
+                var p = JSON.parse(v);
+                var t = (p.value || p.token || p.accessToken || p.access_token || '').toString();
+                if (t && t.length > 20) return true;
+              } catch(e) {}
+            } else if (v.length > 20) {
+              return true;
+            }
+          }
+          return false;
+        }
+
+        try {
+          var tok = localStorage.getItem('token');
+          if (checkVal(tok)) return true;
+
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = (localStorage.key(i) || '').toLowerCase();
+            var v = localStorage.getItem(localStorage.key(i)) || '';
+            if (k.indexOf('token') !== -1 || k.indexOf('auth') !== -1 || k.indexOf('jwt') !== -1 || k.indexOf('user') !== -1) {
+              if (checkVal(v)) return true;
+            }
+            if (v.length > 50 && v.indexOf('.') !== -1) return true;
+          }
+
+          for (var j = 0; j < sessionStorage.length; j++) {
+            var sk = (sessionStorage.key(j) || '').toLowerCase();
+            var sv = sessionStorage.getItem(sessionStorage.key(j)) || '';
+            if (sk.indexOf('token') !== -1 || sk.indexOf('auth') !== -1) {
+              if (checkVal(sv)) return true;
+            }
+          }
+          return false;
+        } catch(e) {
+          return false;
+        }
+      ''');
+      if (res != null && (res.value == true || res.value?.toString() == 'true')) {
+        return true;
+      }
+    } catch (_) {}
+
+    try {
+      final r = await c.evaluateJavascript(source: '''
+        (function() {
+          function checkVal(v) {
+            if (!v || v === 'null' || v === '{}' || v === 'undefined') return false;
+            if (typeof v === 'string') {
+              if (v.startsWith('{')) {
+                try {
+                  var p = JSON.parse(v);
+                  var t = (p.value || p.token || p.accessToken || p.access_token || '').toString();
+                  if (t && t.length > 20) return true;
+                } catch(e) {}
+              } else if (v.length > 20) {
+                return true;
+              }
+            }
+            return false;
+          }
+
+          try {
+            var tok = localStorage.getItem('token');
+            if (checkVal(tok)) return 'FOUND';
+
+            for (var i = 0; i < localStorage.length; i++) {
+              var k = (localStorage.key(i) || '').toLowerCase();
+              var v = localStorage.getItem(localStorage.key(i)) || '';
+              if (k.indexOf('token') !== -1 || k.indexOf('auth') !== -1 || k.indexOf('jwt') !== -1 || k.indexOf('user') !== -1) {
+                if (checkVal(v)) return 'FOUND';
+              }
+              if (v.length > 50 && v.indexOf('.') !== -1) return 'FOUND';
+            }
+
+            for (var j = 0; j < sessionStorage.length; j++) {
+              var sk = (sessionStorage.key(j) || '').toLowerCase();
+              var sv = sessionStorage.getItem(sessionStorage.key(j)) || '';
+              if (sk.indexOf('token') !== -1 || sk.indexOf('auth') !== -1) {
+                if (checkVal(sv)) return 'FOUND';
+              }
+            }
+            return 'NOT_FOUND';
+          } catch(e) {
+            return 'ERROR';
+          }
+        })();
+      ''');
       final s = r?.toString() ?? '';
-      return s.length > 20 && s != 'null';
+      return s.contains('FOUND') && !s.contains('NOT_FOUND');
     } catch (_) {
       return false;
     }
