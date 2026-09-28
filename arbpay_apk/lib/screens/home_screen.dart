@@ -4,11 +4,14 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../models/app_state.dart';
+import '../models/profile.dart';
 import '../services/arbpay_service.dart';
 import '../services/icon_service.dart';
 import '../widgets/log_panel.dart';
 import '../theme/app_theme.dart';
 import 'settings_screen.dart';
+import 'profiles_screen.dart';
+import 'profile_edit_screen.dart';
 
 Future<void> _clearWebViewSession() async {
   try { await CookieManager.instance().deleteAllCookies(); } catch (_) {}
@@ -32,19 +35,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _isRunning   = false;
   int  _webViewKey  = 0;
 
-  final _phoneCtrl = TextEditingController();
-  final _passCtrl  = TextEditingController();
-  bool _obscurePass = true;
-
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
 
   @override
   void initState() {
     super.initState();
-    final state = context.read<AppState>();
-    _phoneCtrl.text = state.phone;
-    _passCtrl.text  = state.password;
     _pulseCtrl = AnimationController(
       vsync: this, duration: const Duration(milliseconds: 1200),
     )..repeat(reverse: true);
@@ -56,18 +52,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void dispose() {
     _service.dispose();
-    _phoneCtrl.dispose();
-    _passCtrl.dispose();
     _pulseCtrl.dispose();
     super.dispose();
   }
 
+  // ── Flow ───────────────────────────────────────────────────────────────────
   Future<void> _captureToken() async {
     final state = context.read<AppState>();
-    state.phone    = _phoneCtrl.text.trim();
-    state.password = _passCtrl.text;
+    if (!state.activeProfile.isConfigured) {
+      await _editProfile(state.activeProfile);
+      if (!mounted) return;
+      if (!context.read<AppState>().activeProfile.isConfigured) return;
+    }
     await _clearWebViewSession();
-    setState(() { _webViewKey++; _webController = null; _showWebView = true; _loginReady = false; });
+    setState(() {
+      _webViewKey++;
+      _webController = null;
+      _showWebView = true;
+      _loginReady = false;
+    });
+  }
+
+  Future<void> _editProfile(Profile profile) async {
+    final state = context.read<AppState>();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChangeNotifierProvider.value(
+          value: state,
+          child: ProfileEditScreen(existing: profile),
+        ),
+      ),
+    );
   }
 
   Future<void> _completeCaptureAndRun() async {
@@ -76,7 +92,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     state.setStatus(BotStatus.capturing);
     state.addLog('Capturing token from session...', level: LogLevel.info);
     if (_webController != null) _service.init(_webController!, state);
-    await _service.captureTokenAndRun(state.phone, state.password, state.amountMin, state.amountMax);
+    await _service.captureTokenAndRun(
+        state.phone, state.password, state.amountMin, state.amountMax);
     setState(() { _isRunning = false; _showWebView = false; _loginReady = false; });
   }
 
@@ -90,9 +107,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     state.reset();
     state.clearLogs();
     _service.stop();
-    setState(() { _isRunning = false; _showWebView = false; _loginReady = false; _webViewKey++; _webController = null; });
+    setState(() {
+      _isRunning = false;
+      _showWebView = false;
+      _loginReady = false;
+      _webViewKey++;
+      _webController = null;
+    });
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Consumer<AppState>(
@@ -111,7 +135,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // ── Main ───────────────────────────────────────────────────────────────────
   Widget _buildMain(AppState state, AppTheme t) {
     return Column(
       children: [
@@ -123,49 +146,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 16),
+                _buildProfileCard(state, t),
+                const SizedBox(height: 14),
                 _buildStatusBanner(state, t),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
                 _buildStatsRow(state, t),
-                const SizedBox(height: 20),
-                _sectionLabel('CREDENTIALS', t),
-                const SizedBox(height: 10),
-                _inputField(controller: _phoneCtrl, label: 'Phone / Username',
-                  icon: Icons.phone_android_rounded, t: t, enabled: !_isRunning),
-                const SizedBox(height: 10),
-                _inputField(
-                  controller: _passCtrl, label: 'Password',
-                  icon: Icons.lock_outline_rounded, t: t,
-                  obscure: _obscurePass, enabled: !_isRunning,
-                  suffix: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (!_obscurePass)
-                        IconButton(
-                          icon: Icon(Icons.copy_rounded, color: t.textDim, size: 16),
-                          tooltip: 'Copy password',
-                          onPressed: () {
-                            Clipboard.setData(ClipboardData(text: _passCtrl.text));
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                              content: Text('Password copied',
-                                style: TextStyle(color: t.bg)),
-                              backgroundColor: t.yellow,
-                              behavior: SnackBarBehavior.floating,
-                              duration: const Duration(seconds: 2),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
-                            ));
-                          },
-                        ),
-                      IconButton(
-                        icon: Icon(
-                          _obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                          color: t.textDim, size: 18),
-                        onPressed: () => setState(() => _obscurePass = !_obscurePass),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
                 _buildActions(state, t),
                 const SizedBox(height: 20),
                 _sectionLabel('LIVE LOG', t),
@@ -182,7 +168,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ── Header ─────────────────────────────────────────────────────────────────
   Widget _buildHeader(AppState state, AppTheme t) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: t.bg,
         border: Border(bottom: BorderSide(color: t.border, width: 0.5)),
@@ -192,24 +178,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: Image.asset(
-              state.isDark ? 'assets/images/app_icon_dark.png' : 'assets/images/app_icon_light.png',
-              width: 38, height: 38, fit: BoxFit.cover),
+              state.isDark
+                  ? 'assets/images/app_icon_dark.png'
+                  : 'assets/images/app_icon_light.png',
+              width: 36, height: 36, fit: BoxFit.cover),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('ARBPay Bot', style: TextStyle(
                 color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
               Row(children: [
-                Text('Auto Buy Engine', style: TextStyle(color: t.textSub, fontSize: 10, letterSpacing: 0.5)),
+                Text('Auto Buy Engine',
+                  style: TextStyle(color: t.textSub, fontSize: 10, letterSpacing: 0.5)),
                 const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
                     color: t.isDark ? const Color(0x33FFCC00) : const Color(0xFF1A1A1A),
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: Colors.transparent),
                   ),
                   child: Text(kBuildVersion, style: TextStyle(
                     color: t.isDark ? t.yellow : const Color(0xFFFFCC00),
@@ -219,7 +207,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ],
           ),
           const Spacer(),
-          // Theme toggle
           _headerBtn(
             icon: state.isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
             color: t.yellow, t: t,
@@ -231,48 +218,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             },
           ),
           const SizedBox(width: 8),
-          // Mode badge
-          GestureDetector(
-            onTap: _isRunning ? null : () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => ChangeNotifierProvider.value(
-                value: state, child: const SettingsScreen())),
-            ).then((_) {
-              if (mounted) {
-                final s = context.read<AppState>();
-                _phoneCtrl.text = s.phone;
-                _passCtrl.text  = s.password;
-              }
-            }),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: t.card,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: t.border),
-              ),
-              child: Row(children: [
-                Icon(state.paymentMode == PaymentMode.bank
-                  ? Icons.account_balance : Icons.currency_rupee,
-                  color: t.yellow, size: 12),
-                const SizedBox(width: 5),
-                Text(state.paymentMode == PaymentMode.bank ? 'BANK' : 'UPI',
-                  style: TextStyle(color: t.yellow, fontSize: 10,
-                    fontWeight: FontWeight.bold, letterSpacing: 0.8)),
-              ]),
-            ),
-          ),
-          const SizedBox(width: 8),
-          _headerBtn(icon: Icons.tune_rounded, color: t.textSub, t: t,
-            onTap: _isRunning ? null : () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => ChangeNotifierProvider.value(
-                value: state, child: const SettingsScreen())),
-            ).then((_) {
-              if (mounted) {
-                final s = context.read<AppState>();
-                _phoneCtrl.text = s.phone;
-                _passCtrl.text  = s.password;
-              }
-            }),
+          _headerBtn(
+            icon: Icons.tune_rounded, color: t.textSub, t: t,
+            onTap: _isRunning
+                ? null
+                : () => Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => ChangeNotifierProvider.value(
+                      value: state, child: const SettingsScreen()))),
           ),
         ],
       ),
@@ -284,7 +236,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 36, height: 36,
+        width: 38, height: 38,
         decoration: BoxDecoration(
           color: t.card,
           borderRadius: BorderRadius.circular(10),
@@ -292,6 +244,128 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ),
         child: Icon(icon, color: onTap == null ? t.textDim : color, size: 18),
       ),
+    );
+  }
+
+  // ── Active profile card ─────────────────────────────────────────────────────
+  Widget _buildProfileCard(AppState state, AppTheme t) {
+    final p = state.activeProfile;
+    final configured = p.isConfigured;
+    final modeLabel = state.paymentMode == PaymentMode.bank ? 'BANK' : 'UPI';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: t.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: configured ? t.yellow.withValues(alpha: 0.35) : t.border,
+        ),
+      ),
+      child: Column(children: [
+        // Tappable body → profile picker
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _isRunning ? null : () => showProfilePicker(context),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(children: [
+              Container(
+                width: 46, height: 46,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: t.yellow,
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Text(p.initial, style: TextStyle(
+                  color: t.bg, fontWeight: FontWeight.bold, fontSize: 19)),
+              ),
+              const SizedBox(width: 14),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Flexible(child: Text(p.name,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: t.textPrimary,
+                        fontSize: 16, fontWeight: FontWeight.bold))),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: t.bg,
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(color: t.border),
+                      ),
+                      child: Text(modeLabel, style: TextStyle(
+                        color: t.yellow, fontSize: 9,
+                        fontWeight: FontWeight.bold, letterSpacing: 0.8)),
+                    ),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text(
+                    configured
+                        ? '${p.maskedPhone}  ·  ₹${p.amountMin}–${p.amountMax}'
+                        : 'No login saved — tap to set up',
+                    style: TextStyle(
+                      color: configured ? t.textSub : t.red,
+                      fontSize: 12),
+                  ),
+                ],
+              )),
+              const SizedBox(width: 6),
+              Column(children: [
+                Icon(Icons.unfold_more_rounded, color: t.yellow, size: 20),
+                const SizedBox(height: 2),
+                Text('SWITCH', style: TextStyle(
+                  color: t.textSub, fontSize: 8, letterSpacing: 0.8)),
+              ]),
+            ]),
+          ),
+        ),
+        Container(height: 0.5, color: t.border),
+        // Footer actions
+        Row(children: [
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _isRunning ? null : () => _editProfile(p),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.edit_outlined,
+                    color: _isRunning ? t.textDim : t.textSub, size: 14),
+                  const SizedBox(width: 6),
+                  Text('Edit', style: TextStyle(
+                    color: _isRunning ? t.textDim : t.textSub,
+                    fontSize: 12, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+          ),
+          Container(width: 0.5, height: 24, color: t.border),
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _isRunning
+                  ? null
+                  : () => Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => ChangeNotifierProvider.value(
+                        value: state, child: const ProfilesScreen()))),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.switch_account_rounded,
+                    color: _isRunning ? t.textDim : t.textSub, size: 14),
+                  const SizedBox(width: 6),
+                  Text('All profiles (${state.profileCount})', style: TextStyle(
+                    color: _isRunning ? t.textDim : t.textSub,
+                    fontSize: 12, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+          ),
+        ]),
+      ]),
     );
   }
 
@@ -387,39 +461,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     ]);
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
   Widget _sectionLabel(String label, AppTheme t) {
     return Text(label, style: TextStyle(
       color: t.textSub, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.5));
   }
 
-  Widget _inputField({
-    required TextEditingController controller, required String label,
-    required IconData icon, required AppTheme t,
-    bool obscure = false, bool enabled = true, Widget? suffix,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: t.card, borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: t.border),
-      ),
-      child: TextField(
-        controller: controller, obscureText: obscure, enabled: enabled,
-        style: TextStyle(color: t.textPrimary, fontSize: 15),
-        decoration: InputDecoration(
-          prefixIcon: Icon(icon, color: t.textDim, size: 20),
-          suffixIcon: suffix,
-          labelText: label,
-          labelStyle: TextStyle(color: t.textSub, fontSize: 13),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
-        ),
-      ),
-    );
-  }
-
   // ── WebView ────────────────────────────────────────────────────────────────
   Widget _buildWebView(AppState state, AppTheme t) {
+    final p = state.activeProfile;
     return Column(children: [
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -428,8 +477,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           _headerBtn(icon: Icons.arrow_back_ios_new_rounded, color: t.textSub, t: t,
             onTap: () => setState(() { _showWebView = false; _loginReady = false; })),
           const SizedBox(width: 12),
-          Expanded(child: Text('Login to ARBPay',
-            style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 16))),
+          Expanded(child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Login to ARBPay',
+                style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
+              Text('Signing in as ${p.name}',
+                style: TextStyle(color: t.textSub, fontSize: 11)),
+            ],
+          )),
           GestureDetector(
             onTap: () => _showLogsSheet(state, t),
             child: Container(
@@ -455,7 +511,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         child: Row(children: [
           Icon(Icons.info_outline_rounded, color: t.yellow, size: 15),
           const SizedBox(width: 8),
-          Expanded(child: Text('Log in below, then tap "Run Bot" once on the home page.',
+          Expanded(child: Text('Log in below, then tap "Run Bot" once you are on the home page.',
             style: TextStyle(color: t.textSub, fontSize: 12))),
         ]),
       ),
@@ -468,8 +524,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
         ),
         onWebViewCreated: (c) { _webController = c; _service.init(c, state); },
-        onLoadStop: (c, url) async { _webController = c; await _handleUrlChange(c, url?.toString() ?? ''); },
-        onUpdateVisitedHistory: (c, url, _) async { await _handleUrlChange(c, url?.toString() ?? ''); },
+        onLoadStop: (c, url) async {
+          _webController = c;
+          await _handleUrlChange(c, url?.toString() ?? '');
+        },
+        onUpdateVisitedHistory: (c, url, _) async =>
+            _handleUrlChange(c, url?.toString() ?? ''),
       )),
       Container(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
@@ -509,21 +569,40 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  /// Login detection: the site redirects to a rotating domain, so the URL is
+  /// no longer a reliable signal. Read the auth token straight from
+  /// localStorage instead, and autofill the login form when it is shown.
   Future<void> _handleUrlChange(InAppWebViewController c, String url) async {
     _webController = c;
-    final isLogin = url.contains('login') || url == 'https://arbpay.me/' ||
-        url == 'https://arbpay.me/#/' || url.endsWith('arbpay.me');
-    if (isLogin) { await _autoFill(c); if (mounted) setState(() => _loginReady = false); }
-    else if (url.contains('arbpay.me')) { if (mounted) setState(() => _loginReady = true); }
+    if (await _hasToken(c)) {
+      if (mounted && !_loginReady) setState(() => _loginReady = true);
+      return;
+    }
+    if (url.contains('login')) {
+      await _autoFill(c);
+      if (mounted && _loginReady) setState(() => _loginReady = false);
+    }
+  }
+
+  Future<bool> _hasToken(InAppWebViewController c) async {
+    try {
+      final r = await c.evaluateJavascript(
+          source: "try{return localStorage.getItem('token')||''}catch(e){return ''}");
+      final s = r?.toString() ?? '';
+      return s.length > 20 && s != 'null';
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _autoFill(InAppWebViewController c) async {
-    final phone = _phoneCtrl.text.trim();
-    final pass  = _passCtrl.text;
+    final state = context.read<AppState>();
+    final phone = state.phone.trim();
+    final pass = state.password;
     if (phone.isEmpty || pass.isEmpty) return;
-    final s = context.read<AppState>();
-    for (int i = 0; i < 15; i++) {
-      await Future.delayed(const Duration(milliseconds: 800));
+    for (int i = 0; i < 12; i++) {
+      await Future.delayed(const Duration(milliseconds: 700));
+      if (!mounted) return;
       final sp = phone.replaceAll('"', r'\"');
       final sw = pass.replaceAll('"', r'\"');
       final r = await c.evaluateJavascript(source: '''
@@ -540,8 +619,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           set(ph,"$sp");set(pw,"$sw");return 'FILLED';
         })();
       ''');
-      if ((r?.toString() ?? '').contains('FILLED')) { s.addLog('Autofill success', level: LogLevel.success); break; }
-      if (i == 14) s.addLog('Autofill failed', level: LogLevel.warning);
+      if ((r?.toString() ?? '').contains('FILLED')) {
+        state.addLog('Autofill success', level: LogLevel.success);
+        break;
+      }
+      if (i == 11) state.addLog('Autofill failed', level: LogLevel.warning);
     }
   }
 
@@ -688,10 +770,7 @@ class _LogsSheet extends StatelessWidget {
                   Clipboard.setData(ClipboardData(
                     text: logs.reversed.map((e) => '[${e.time}] ${e.message}').join('\n')));
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text('${logs.length} lines copied',
-                      style: TextStyle(color: t.bg)),
-                    backgroundColor: t.yellow, behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))));
+                    content: Text('${logs.length} lines copied')));
                 },
                 child: Text('COPY', style: TextStyle(color: t.textSub, fontSize: 11, letterSpacing: 1)),
               ),
@@ -749,4 +828,3 @@ class _LogsSheet extends StatelessWidget {
     }
   }
 }
-

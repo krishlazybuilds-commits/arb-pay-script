@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'profile.dart';
 
 enum BotStatus { idle, connecting, cloudflare, loggingIn, capturing, running, qrReady, success, error }
 
@@ -22,13 +23,101 @@ class AppState extends ChangeNotifier {
   int _successCount = 0;
   String _currentOrder = '';
 
-  // Settings
-  String phone = '';
-  String password = '';
-  int amountMin = 1700;
-  int amountMax = 2000;
-  PaymentMode paymentMode = PaymentMode.upi;
+  // Profiles — each account is a saved Profile. The active one backs the
+  // phone/password/amount/paymentMode accessors below, so callers keep working.
+  List<Profile> _profiles = [];
+  String _activeProfileId = '';
   bool isDark = true;
+
+  List<Profile> get profiles => List.unmodifiable(_profiles);
+  String get activeProfileId => _activeProfileId;
+  bool get hasProfiles => _profiles.isNotEmpty;
+  int get profileCount => _profiles.length;
+
+  static String newProfileId() =>
+      DateTime.now().microsecondsSinceEpoch.toString();
+
+  Profile get activeProfile {
+    if (_profiles.isEmpty) {
+      _profiles.add(Profile(id: newProfileId(), name: 'Account 1'));
+    }
+    return _profiles.firstWhere(
+      (p) => p.id == _activeProfileId,
+      orElse: () => _profiles.first,
+    );
+  }
+
+  // Settings — delegated to the active profile.
+  String get phone => activeProfile.phone;
+  set phone(String v) {
+    activeProfile.phone = v;
+    notifyListeners();
+  }
+
+  String get password => activeProfile.password;
+  set password(String v) {
+    activeProfile.password = v;
+    notifyListeners();
+  }
+
+  int get amountMin => activeProfile.amountMin;
+  set amountMin(int v) {
+    activeProfile.amountMin = v;
+    notifyListeners();
+  }
+
+  int get amountMax => activeProfile.amountMax;
+  set amountMax(int v) {
+    activeProfile.amountMax = v;
+    notifyListeners();
+  }
+
+  PaymentMode get paymentMode => activeProfile.paymentMode;
+  set paymentMode(PaymentMode m) {
+    activeProfile.paymentMode = m;
+    notifyListeners();
+  }
+
+  // ── Profile management ────────────────────────────────────────────────────
+  void setProfiles(List<Profile> profiles, String activeId) {
+    _profiles = List.of(profiles);
+    if (_profiles.isEmpty) {
+      _profiles.add(Profile(id: newProfileId(), name: 'Account 1'));
+    }
+    _activeProfileId = _profiles.any((p) => p.id == activeId)
+        ? activeId
+        : _profiles.first.id;
+    notifyListeners();
+  }
+
+  void selectProfile(String id) {
+    if (_profiles.any((p) => p.id == id)) {
+      _activeProfileId = id;
+      notifyListeners();
+    }
+  }
+
+  void upsertProfile(Profile p) {
+    final i = _profiles.indexWhere((x) => x.id == p.id);
+    if (i >= 0) {
+      _profiles[i] = p;
+    } else {
+      _profiles.add(p);
+      _activeProfileId = p.id;
+    }
+    notifyListeners();
+  }
+
+  void deleteProfile(String id) {
+    _profiles.removeWhere((p) => p.id == id);
+    if (_profiles.isEmpty) {
+      _profiles.add(Profile(id: newProfileId(), name: 'Account 1'));
+    }
+    if (_activeProfileId == id) {
+      _activeProfileId = _profiles.first.id;
+    }
+    notifyListeners();
+  }
 
   BotStatus get status => _status;
   List<LogEntry> get logs => List.unmodifiable(_logs);

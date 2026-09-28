@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 import '../models/app_state.dart';
 
 class ArbPayService {
-  static const String _apiUrl = 'https://apiweb.arbpay.me';
+  static const String _defaultApiUrl = 'https://apiweb.arbpay.me';
   static const List<String> _bankCodes = [
     'mobikwik', 'paytm', 'phonepe', 'gpay', 'amazonpay', 'freecharge', 'airtel'
   ];
@@ -16,6 +16,8 @@ class ArbPayService {
   bool _running = false;
   String _token = '';
   String _deviceCode = '';
+  String _apiBase = _defaultApiUrl;   // rotating — read from runtime-domains
+  String _siteOrigin = 'https://arbpay.me';   // rotating front-end origin
   int _bankIndex = 0;
   final Set<String> _skippedOrders = {};
   final Set<String> _seenBuyCodes = {};   // mirrors Python _seen_codes
@@ -110,7 +112,9 @@ class ArbPayService {
     }
 
     final lsMap = Map<String, dynamic>.from(result.value as Map);
+    _apiBase = _discoverApiBase(lsMap);
     _log('LS keys: ${lsMap.keys.toList()}', level: LogLevel.info);
+    _log('API base: $_apiBase', level: LogLevel.info);
 
     // Primary path: exact Python approach
     try {
@@ -206,14 +210,38 @@ class ArbPayService {
     }
   }
 
-  // ── Fetch banks actually available on the site for buying ───────────────
-  // The endpoint takes {'type': '1'} for buying and returns data.allBanks
-  // (supported payment banks). Falls back to the hardcoded list that the
-  // Python script uses, so this is a safe default on any failure.
+  // Read the rotating API base out of localStorage, exactly like the Python
+  // script: runtime-domains:PRO -> selections.api.
+  String _discoverApiBase(Map<String, dynamic> lsMap) {
+    try {
+      final raw = lsMap['runtime-domains:PRO']?.toString() ?? '';
+      final rt = jsonDecode(raw) as Map;
+      final selections = rt['selections'];
+      final api =
+          (selections is Map ? selections['api'] : null)?.toString() ?? '';
+      if (api.isNotEmpty) return api;
+    } catch (_) {}
+    return _defaultApiUrl;
+  }
+
+  String get _apiOrigin {
+    try {
+      final o = Uri.parse(_apiBase).origin;
+      return o.isNotEmpty ? o : _defaultApiUrl;
+    } catch (_) {
+      return _defaultApiUrl;
+    }
+  }
+
+  // ── Fetch the banks this account can actually buy with ──────────────────
+  // Prefers boundBanks (the account's linked banks), then allBanks, then the
+  // hardcoded default, using the same payload the site itself sends.
   Future<void> _fetchAvailableBanks() async {
+    final isBank = _state?.paymentMode == PaymentMode.bank;
+    final type = isBank ? 2 : 1;
     final resp = await _request(
       '/ar-wallet/kycCenter/getBanks/bankListAndBoundListForQuick',
-      {'type': '1'},
+      {'sourceType': 2, 'type': type},
       verbose: true,
     );
 
@@ -233,56 +261,34 @@ class ArbPayService {
       return;
     }
 
-    // The response shape isn't 100% known, so scan recursively for any
-    // bank-code-like field that isn't explicitly disabled.
-    final codes = <String>[];
-    void scan(dynamic node) {
-      if (node is Map) {
-        final code = (node['bankCode'] ?? node['payBankCode'] ??
-                node['channelCode'] ?? node['bankCardCode'] ?? '')
-            .toString()
-            .toLowerCase()
-            .trim();
-        final status = (node['status'] ?? node['enable'] ?? node['enabled'] ??
-                node['available'] ?? node['state'] ?? '')
-            .toString()
-            .toLowerCase();
-        final disabled = status == '0' || status == 'false' ||
-            status == 'disabled' || status == 'off' || status == 'no';
-        if (code.isNotEmpty && !disabled) codes.add(code);
-        for (final v in node.values) {
-          scan(v);
-        }
-      } else if (node is List) {
-        for (final v in node) {
-          scan(v);
-        }
-      }
-    }
-    // Walk data.allBanks (supported payment banks for buying). Also
-    // check data.boundBanks as a fallback in case the shape differs.
-    final dataNode = resp['data'];
-    if (dataNode is Map) {
-      scan(dataNode['allBanks'] ?? dataNode['boundBanks'] ?? dataNode);
+    final data = resp['data'];
+
+    List<dynamic> listOf(String key) {
+      if (data is Map && data[key] is List) return data[key] as List;
+      return const [];
     }
 
-    // Order: known codes first (we know how to send them), then any extras.
+    final bound = listOf('boundBanks');
+    final all = listOf('allBanks');
+    final chosen = bound.isNotEmpty ? bound : all;
+
     final seen = <String>{};
     final ordered = <String>[];
-    for (final b in _bankCodes) {
-      if (codes.contains(b) && seen.add(b)) ordered.add(b);
-    }
-    for (final c in codes) {
-      if (seen.add(c)) ordered.add(c);
+    for (final b in chosen) {
+      if (b is Map) {
+        final code = (b['bankCode'] ?? b['payBankCode'] ?? '').toString().trim();
+        if (code.isNotEmpty && seen.add(code)) ordered.add(code);
+      }
     }
 
     if (ordered.isEmpty) {
-      _log('Bank list parsed but NO usable bankCodes found. Using default: ${_bankCodes.join(", ")}',
+      _log('Bank list unavailable — using default cycle (${_bankCodes.join(", ")})',
           level: LogLevel.warning);
       _activeBanks = List<String>.from(_bankCodes);
     } else {
       _activeBanks = ordered;
-      _log('Enabled banks: ${ordered.join(", ")}', level: LogLevel.success);
+      _log('Active banks (${bound.isNotEmpty ? "bound" : "all"}): ${ordered.join(", ")}',
+          level: LogLevel.success);
     }
   }
 
@@ -490,8 +496,17 @@ class ArbPayService {
             '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
       }
 
+      // The front-end origin rotates too; keep Origin/Referer in step so the
+      // native client looks exactly like the WebView it was harvested from.
+      try {
+        final cur = await _webView!.getUrl();
+        if (cur != null && cur.host.isNotEmpty) {
+          _siteOrigin = '${cur.scheme}://${cur.host}';
+        }
+      } catch (_) {}
+
       // Poke the API host through the WebView so Cloudflare sets cf_clearance
-      // on apiweb.arbpay.me.  The browser handles the JS challenge natively.
+      // on it. The browser handles the JS challenge natively.
       // Retry up to 3 times with increasing delays.
       final cm = CookieManager.instance();
       var byName = <String, String>{};
@@ -499,7 +514,7 @@ class ArbPayService {
       for (int attempt = 0; attempt < 3; attempt++) {
         // Collect existing cookies first.
         byName = {};
-        for (final host in ['https://apiweb.arbpay.me', 'https://arbpay.me']) {
+        for (final host in [_apiOrigin, 'https://arbpay.me']) {
           try {
             final cookies = await cm.getCookies(url: WebUri(host));
             for (final c in cookies) {
@@ -512,7 +527,7 @@ class ArbPayService {
         _log('Warming API host for cf_clearance (attempt ${attempt + 1})...', level: LogLevel.info);
         await _webView!.callAsyncJavaScript(functionBody: '''
           try {
-            await fetch("https://apiweb.arbpay.me", {
+            await fetch("$_apiBase", {
               method: "GET",
               mode: "no-cors",
               credentials: "include"
@@ -570,15 +585,15 @@ class ArbPayService {
       'deviceType': '3',
       'language': '1',
       'page': page,
-      'Origin': 'https://arbpay.me',
-      'Referer': 'https://arbpay.me/',
+      'Origin': _siteOrigin,
+      'Referer': '$_siteOrigin/',
       if (_userAgent.isNotEmpty) 'User-Agent': _userAgent,
       if (_cookieHeader.isNotEmpty) 'Cookie': _cookieHeader,
     };
 
     try {
       final resp = await _httpClient!
-          .post(Uri.parse('$_apiUrl$path'), headers: headers, body: jsonEncode(body))
+          .post(Uri.parse('$_apiBase$path'), headers: headers, body: jsonEncode(body))
           .timeout(const Duration(seconds: 8));
 
       final status = resp.statusCode;
@@ -634,7 +649,7 @@ class ArbPayService {
     try {
       final cm = CookieManager.instance();
       var byName = <String, String>{};
-      for (final host in ['https://apiweb.arbpay.me', 'https://arbpay.me']) {
+      for (final host in [_apiOrigin, 'https://arbpay.me']) {
         try {
           final cookies = await cm.getCookies(url: WebUri(host));
           for (final c in cookies) {
@@ -647,7 +662,7 @@ class ArbPayService {
         _log('Re-warming API host for cf_clearance...', level: LogLevel.info);
         await _webView!.callAsyncJavaScript(functionBody: '''
           try {
-            await fetch("https://apiweb.arbpay.me", {
+            await fetch("$_apiBase", {
               method: "GET", mode: "no-cors", credentials: "include"
             });
           } catch (_) {}
@@ -655,7 +670,7 @@ class ArbPayService {
         ''');
         await Future.delayed(const Duration(seconds: 3));
         byName = {};
-        for (final host in ['https://apiweb.arbpay.me', 'https://arbpay.me']) {
+        for (final host in [_apiOrigin, 'https://arbpay.me']) {
           try {
             final cookies = await cm.getCookies(url: WebUri(host));
             for (final c in cookies) {
@@ -715,7 +730,7 @@ class ArbPayService {
           }
         ''',
         arguments: {
-          'apiUrl':     '$_apiUrl$path',
+          'apiUrl':     '$_apiBase$path',
           'token':      _token,
           'deviceCode': _deviceCode,
           'page':       page,
