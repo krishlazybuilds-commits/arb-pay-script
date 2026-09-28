@@ -6,10 +6,12 @@ on:
     paths:
       - 'arbpay_apk/**'
       - '.github/workflows/build-apk.yml'
+    tags:
+      - 'v*'
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -41,6 +43,9 @@ jobs:
       - name: Analyze (non-blocking)
         run: flutter analyze --no-fatal-infos --no-fatal-warnings || true
 
+      - name: Run tests
+        run: flutter test
+
       - name: Build release APK
         run: flutter build apk --release
 
@@ -51,3 +56,14 @@ jobs:
           path: arbpay_apk/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Stage APK for release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: cp build/app/outputs/flutter-apk/app-release.apk "ARBPay-Bot-${{ github.ref_name }}.apk"
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: arbpay_apk/ARBPay-Bot-${{ github.ref_name }}.apk
+          generate_release_notes: true
