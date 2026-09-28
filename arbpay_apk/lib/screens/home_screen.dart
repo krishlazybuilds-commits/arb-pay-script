@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -18,7 +19,7 @@ Future<void> _clearWebViewSession() async {
   try { await WebStorageManager.instance().deleteAllData(); } catch (_) {}
 }
 
-const kBuildVersion = 'v1.2.2';
+const kBuildVersion = 'v1.2.3';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -47,6 +48,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     'https://arbpay.ai',
   ];
 
+  // A hanging navigation (e.g. arbpay.me timing out on the phone's network)
+  // never fires onLoadStop/onReceivedError, so the spinner would spin forever.
+  // This caps the wait and auto-falls back to the next domain.
+  static const _loadTimeout = Duration(seconds: 12);
+  static const _maxDomainTries = 4;
+  Timer? _loadTimer;
+  int _domainTries = 0;
+
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
 
@@ -63,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _loadTimer?.cancel();
     _service.dispose();
     _pulseCtrl.dispose();
     super.dispose();
@@ -84,7 +94,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _loginReady = false;
       _loadError = '';
       _pageLoading = true;
+      _domainTries = 0;
     });
+    _startTimer();
   }
 
   void _retryPage() {
@@ -93,7 +105,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _pageLoading = true;
       _webViewKey++;
       _webController = null;
+      _domainTries = 0;
     });
+    _startTimer();
   }
 
   void _nextDomain() {
@@ -103,7 +117,45 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _pageLoading = true;
       _webViewKey++;
       _webController = null;
+      _domainTries = 0;
     });
+    _startTimer();
+  }
+
+  void _startTimer() {
+    _loadTimer?.cancel();
+    _loadTimer = Timer(_loadTimeout, _onLoadTimeout);
+  }
+
+  void _stopTimer() {
+    _loadTimer?.cancel();
+    _loadTimer = null;
+  }
+
+  void _onLoadTimeout() {
+    if (!mounted) return;
+    _loadTimer?.cancel();
+    setState(() { _pageLoading = false; _loadError = 'Connection timed out'; });
+    final state = context.read<AppState>();
+    state.addLog(
+        'Load timed out on ${_entryUrls[_entryIndex]}; trying next domain',
+        level: LogLevel.error);
+    _autoAdvanceDomain();
+  }
+
+  // After a timeout/error, silently retry the next domain a few times before
+  // surfacing the error UI for a manual choice.
+  void _autoAdvanceDomain() {
+    if (_domainTries >= _maxDomainTries - 1) return;
+    _domainTries++;
+    setState(() {
+      _entryIndex = (_entryIndex + 1) % _entryUrls.length;
+      _loadError = '';
+      _pageLoading = true;
+      _webViewKey++;
+      _webController = null;
+    });
+    _startTimer();
   }
 
   Future<void> _editProfile(Profile profile) async {
@@ -565,9 +617,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           onWebViewCreated: (c) { _webController = c; _service.init(c, state); },
           onLoadStart: (c, url) {
+            _startTimer();
             if (mounted) setState(() => _pageLoading = true);
           },
           onLoadStop: (c, url) async {
+            _stopTimer();
             _webController = c;
             if (mounted) {
               setState(() { _pageLoading = false; _loadError = ''; });
@@ -575,11 +629,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             await _handleUrlChange(c, url?.toString() ?? '');
           },
           onReceivedError: (c, request, error) {
-            if (!mounted) return;
             if (request.isForMainFrame != true) return;
+            _stopTimer();
+            if (!mounted) return;
             setState(() { _pageLoading = false; _loadError = error.description; });
             state.addLog('Page load failed: ${error.description} (${error.type})',
                 level: LogLevel.error);
+            _autoAdvanceDomain();
           },
           onUpdateVisitedHistory: (c, url, _) async =>
               _handleUrlChange(c, url?.toString() ?? ''),
