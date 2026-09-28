@@ -85,11 +85,25 @@ def build_driver(browser: str, headless: bool):
 _api_driver = None      # Selenium WebDriver used for all fetch() calls
 _api_token      = ""
 _api_device_code = ""
+_api_base       = API_URL   # dynamic — read from localStorage runtime-domains
+
+
+def discover_api_base(ls: dict) -> str:
+    """The API host rotates; it is published in localStorage as
+    runtime-domains:PRO -> selections.api. Fall back to the static URL."""
+    try:
+        rt = json.loads(ls.get("runtime-domains:PRO", "{}"))
+        api = (rt.get("selections") or {}).get("api", "")
+        if api:
+            return api
+    except Exception:
+        pass
+    return API_URL
 
 
 def build_api_session(driver):
-    """Extract token + deviceCode from localStorage; store driver for fetch() calls."""
-    global _api_driver, _api_token, _api_device_code
+    """Extract token + deviceCode + API base from localStorage; store driver."""
+    global _api_driver, _api_token, _api_device_code, _api_base
     try:
         ls = driver.execute_script(
             "return Object.entries(window.localStorage)"
@@ -97,6 +111,7 @@ def build_api_session(driver):
         )
         token       = json.loads(ls.get("token",      "{}")).get("value", "")
         device_code = json.loads(ls.get("deviceCode", "{}")).get("value", "")
+        api_base    = discover_api_base(ls)
     except Exception as e:
         log(f"Could not read localStorage: {e}")
         return None
@@ -108,7 +123,9 @@ def build_api_session(driver):
     _api_driver      = driver
     _api_token       = token
     _api_device_code = device_code
+    _api_base        = api_base
     log(f"API session built — token ends ...{token[-12:]} (browser-fetch mode)")
+    log(f"API base: {_api_base}")
     return driver   # truthy sentinel so callers know session is ready
 
 
@@ -142,7 +159,7 @@ try {
     try:
         result = _api_driver.execute_script(
             js,
-            f"{API_URL}{path}",
+            f"{_api_base or API_URL}{path}",
             body,
             _api_token,
             _api_device_code,
@@ -232,12 +249,103 @@ def api_before_buy(platform_order: str, amount: int) -> dict:
 # Bank codes to cycle through when server rejects the current one (code 2005)
 BANK_CODES = ["mobikwik", "paytm", "phonepe", "gpay", "amazonpay", "freecharge", "airtel"]
 
+# Banks this account can actually buy with; refreshed from the API.
+_active_banks = list(BANK_CODES)
+
+
+def fetch_active_banks() -> list:
+    """Query the site for the banks this account is bound to.
+    Prefers boundBanks, then allBanks, then the hardcoded default."""
+    global _active_banks
+    resp = browser_fetch("/ar-wallet/kycCenter/getBanks/bankListAndBoundListForQuick",
+                         {"sourceType": 2, "type": 1})
+    data = resp.get("data") if isinstance(resp, dict) else None
+    codes = []
+    if isinstance(data, dict):
+        for key in ("boundBanks", "allBanks"):
+            for b in (data.get(key) or []):
+                code = str(b.get("bankCode") or "").strip()
+                if code and code not in codes:
+                    codes.append(code)
+            if key == "boundBanks" and codes:
+                break
+    if codes:
+        _active_banks = codes
+        log(f"Active banks: {', '.join(codes)}")
+    else:
+        log("Could not fetch bank list — using default cycle")
+    return _active_banks
+
 def api_buy(platform_order: str, amount: int,
             buy_bank_code: str = "mobikwik", buyer_kyc_id: int = 0) -> dict:
     return browser_fetch("/ar-wallet/buyCenter/buy",
                          {"amount": amount, "platformOrder": platform_order,
                           "payType": "3", "orderType": 1,
                           "buyBankCode": buy_bank_code, "buyerKycId": buyer_kyc_id})
+
+
+def api_buy_race(platform_order: str, amount: int, buy_bank_code: str,
+                 concurrency: int = 3) -> dict:
+    """Fire several identical buy requests at once (async XHR) so the earliest
+    one to reach the server claims the order. First success wins; otherwise the
+    first non-empty response is returned."""
+    if not _api_driver:
+        return {}
+    body = {"amount": amount, "platformOrder": platform_order,
+            "payType": "3", "orderType": 1,
+            "buyBankCode": buy_bank_code, "buyerKycId": 0}
+    js = """
+    var url = arguments[0], body = JSON.stringify(arguments[1]);
+    var token = arguments[2], dev = arguments[3], page = arguments[4];
+    var n = arguments[5], done = arguments[6];
+    var results = [], remaining = n;
+    function finish() { if (remaining <= 0) done(results); }
+    function fire() {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', url, true);
+      xhr.setRequestHeader('Accept','application/json, text/plain, */*');
+      xhr.setRequestHeader('Content-Type','application/json');
+      xhr.setRequestHeader('authorization','Bearer ' + token);
+      xhr.setRequestHeader('deviceCode', dev);
+      xhr.setRequestHeader('deviceId','');
+      xhr.setRequestHeader('deviceType','3');
+      xhr.setRequestHeader('language','1');
+      xhr.setRequestHeader('page', page);
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState === 4) {
+          results.push({status: xhr.status, text: xhr.responseText || ''});
+          remaining--; finish();
+        }
+      };
+      try { xhr.send(body); }
+      catch (e) { results.push({status: 0, text: String(e)}); remaining--; finish(); }
+    }
+    for (var i = 0; i < n; i++) fire();
+    """
+    try:
+        results = _api_driver.execute_async_script(
+            js, f"{_api_base or API_URL}/ar-wallet/buyCenter/buy",
+            body, _api_token, _api_device_code, "Arb", concurrency,
+        )
+    except Exception:
+        return {}
+    if not results:
+        return {}
+
+    success_codes = ("200", "0", "1", "00", "success", "SUCCESS")
+    parsed = []
+    for r in results:
+        try:
+            parsed.append(json.loads(r.get("text") or "{}"))
+        except Exception:
+            parsed.append({})
+    for d in parsed:
+        if str(d.get("code", "")) in success_codes:
+            return d
+    for d in parsed:
+        if d:
+            return d
+    return {}
 
 
 def api_get_payment_page(mr_order: str) -> dict:
@@ -268,7 +376,7 @@ def api_fast_buy_loop(amount_min: int = 100, amount_max: int = 1000, driver=None
     log("API fast-buy loop started (browser-fetch mode)")
     attempts = 0
     empty_streak = 0
-    bank_index = 0               # cycles through BANK_CODES on 2005
+    bank_index = 0               # cycles through _active_banks on 2005
     skipped_orders = set()       # orders that returned 2005 for ALL banks
     fetch_fail_streak = 0        # consecutive empty fetch() responses
 
@@ -317,8 +425,8 @@ def api_fast_buy_loop(amount_min: int = 100, amount_max: int = 1000, driver=None
             log(f"API attempt {attempts}: order={platform_order} amount={amount}")
 
         # Skip beforeBuy — go straight to buy to win the race.
-        current_bank = BANK_CODES[bank_index % len(BANK_CODES)]
-        buy_resp = api_buy(platform_order, amount, buy_bank_code=current_bank)
+        current_bank = _active_banks[bank_index % len(_active_banks)]
+        buy_resp = api_buy_race(platform_order, amount, current_bank)
         buy_code = str(buy_resp.get("code", ""))
 
         # Detect fetch() failures (empty dict = network/session error)
@@ -351,7 +459,7 @@ def api_fast_buy_loop(amount_min: int = 100, amount_max: int = 1000, driver=None
             # "Please select another bank" — try next bank code
             log(f"[DEBUG] Bank '{current_bank}' rejected for {platform_order} — trying next bank")
             bank_index += 1
-            if bank_index % len(BANK_CODES) == 0:
+            if bank_index % len(_active_banks) == 0:
                 # Exhausted all banks for this order — skip it
                 log(f"[DEBUG] All banks rejected for {platform_order} — skipping order")
                 skipped_orders.add(platform_order)
@@ -868,33 +976,49 @@ def set_input_value(driver, element, value: str, field_name: str):
 def login(driver, phone: str, password: str):
     log(f"Opening {URL}")
     enable_cdp_network(driver)
-    driver.get(URL)
-    time.sleep(LOGIN_SETTLE)
 
-    phone_input, password_input = wait_for_login_form(driver)
-    set_input_value(driver, phone_input,    phone,    "phone number")
-    time.sleep(INPUT_SETTLE)
-    set_input_value(driver, password_input, password, "password")
-    time.sleep(INPUT_SETTLE)
+    for attempt in range(1, 4):
+        driver.get(URL)
+        time.sleep(LOGIN_SETTLE)
+        try:
+            phone_input, password_input = wait_for_login_form(driver)
+        except TimeoutException:
+            log(f"Login form not found (attempt {attempt}) — retrying")
+            continue
 
-    submit = find_submit_button(driver)
-    log("Submitting login form")
-    try:
-        submit.click()
-    except ElementClickInterceptedException:
-        driver.execute_script("arguments[0].click();", submit)
+        set_input_value(driver, phone_input,    phone,    "phone number")
+        time.sleep(INPUT_SETTLE)
+        set_input_value(driver, password_input, password, "password")
+        time.sleep(INPUT_SETTLE)
 
-    try:
-        WebDriverWait(driver, 20).until(
-            lambda d: URL not in d.current_url
-                      or len(d.find_elements(By.CSS_SELECTOR, "input[type='password']")) == 0
-        )
-        log(f"Login confirmed — {driver.current_url}")
-        build_api_session(driver)
-        return True
-    except TimeoutException:
-        log(f"Login unconfirmed — {driver.current_url}")
-        return False
+        submit = find_submit_button(driver)
+        log(f"Submitting login form (attempt {attempt})")
+        try:
+            driver.execute_script("arguments[0].click();", submit)
+        except Exception:
+            pass
+
+        # The site redirects to a rotating domain, so "URL changed" is not a
+        # login signal. Wait for the auth token to land in localStorage.
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                tok = driver.execute_script(
+                    "try { return window.localStorage.getItem('token') || ''; } "
+                    "catch (e) { return ''; }"
+                )
+            except Exception:
+                tok = ""
+            if tok and tok not in ("", "{}"):
+                log(f"Login confirmed — {driver.current_url}")
+                build_api_session(driver)
+                return True
+            time.sleep(0.5)
+
+        log(f"Login attempt {attempt} did not produce a token — retrying")
+
+    log("Login failed after retries")
+    return False
 
 
 # ── Popup dismissal ───────────────────────────────────────────────────────────
@@ -934,7 +1058,7 @@ def dismiss_popups(driver, attempts: int = 5):
 
 # ── Core buy flow (one round) ─────────────────────────────────────────────────
 
-def run_one_buy_round(driver):
+def run_one_buy_round(driver, amount_min: int = 1700, amount_max: int = 2000):
     """
     Navigate to OTP-UPI → Small, then use fast HTTP API loop to win a slot.
     Falls back to Selenium clicking if API session is unavailable.
@@ -943,17 +1067,24 @@ def run_one_buy_round(driver):
     reset_buylist_debug()
     if hasattr(api_fast_buy_loop, "_seen_codes"):
         api_fast_buy_loop._seen_codes.clear()
-    click_by_text(driver, ["Buy ARB", "Buy Arb"], "Buy ARB button", timeout=8.0)
-    time.sleep(0.1)
-    click_by_text(driver, ["OTP-UPI", "OTP UPI", "Otp-Upi", "Otp Upi"], "OTP UPI option", timeout=8.0)
-    time.sleep(0.05)
-    click_by_text(driver, ["Small"], "Small tab", timeout=5.0)
-    time.sleep(0.3)
+    # Navigate to the Buy → OTP-UPI screen. Best-effort: the fast API path
+    # below does not depend on the amount-band UI, and the old "Small" tab no
+    # longer exists (bands are now explicit ₹ ranges like "₹500 - 700").
+    for texts, desc, timeout in (
+        (["Buy ARB", "Buy Arb"], "Buy ARB button", 8.0),
+        (["OTP-UPI", "OTP UPI", "Otp-Upi", "Otp Upi"], "OTP UPI option", 8.0),
+    ):
+        try:
+            click_by_text(driver, texts, desc, timeout=timeout)
+        except TimeoutException:
+            log(f"[WARN] {desc} not found — continuing anyway")
+        time.sleep(0.1)
 
     # ── Fast API path ──────────────────────────────────────────────────────
     if _api_driver:
+        fetch_active_banks()
         log("Using FAST API mode — browser fetch() (buyList → beforeBuy → buy)")
-        mr_order, amount = api_fast_buy_loop(amount_min=1700, amount_max=2000, driver=driver)
+        mr_order, amount = api_fast_buy_loop(amount_min=amount_min, amount_max=amount_max, driver=driver)
         if mr_order:
             log(f"Order claimed: {mr_order} for ₹{amount} — refreshing page to show payment popup...")
             driver.refresh()
@@ -981,7 +1112,7 @@ def run_one_buy_round(driver):
 
 # ── Repeat loop with user prompt ──────────────────────────────────────────────
 
-def run_loop(driver):
+def run_loop(driver, amount_min: int = 1700, amount_max: int = 2000):
     """
     Run buy rounds indefinitely, asking the user after each QR/payment
     whether they want to go again.
@@ -990,7 +1121,7 @@ def run_loop(driver):
     while True:
         log(f"========== Round {round_number} ==========")
         try:
-            run_one_buy_round(driver)
+            run_one_buy_round(driver, amount_min, amount_max)
         except TimeoutException as exc:
             log(f"Round {round_number} timed out: {exc}")
         except KeyboardInterrupt:
@@ -1030,6 +1161,8 @@ def get_args():
     parser = argparse.ArgumentParser(description="Log into arbpay.me with Selenium.")
     parser.add_argument("--browser",  choices=["chrome", "edge"], default="chrome")
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--amount-min", type=int, default=1700)
+    parser.add_argument("--amount-max", type=int, default=2000)
     return parser.parse_args()
 
 
@@ -1045,12 +1178,12 @@ def main():
     success = login(driver, PHONE_NUMBER, PASSWORD)
     dismiss_popups(driver)
 
-    if success:
-        log("Login confirmed — entering buy loop")
-    else:
-        log("Login unconfirmed — attempting buy loop anyway")
+    if not success:
+        log("Login failed — exiting. Check credentials / site status.")
+        sys.exit(1)
+    log("Login confirmed — entering buy loop")
 
-    run_loop(driver)
+    run_loop(driver, args.amount_min, args.amount_max)
 
     if not args.headless:
         log("Browser left open")
